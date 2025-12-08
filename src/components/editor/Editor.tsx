@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
-import { Layers, Crop as CropIcon, Image as ImageIcon, Download, ScanText, X, Wand2, CreditCard, Undo, Redo, Minimize2, FileType, ArrowUpDown, Palette, SlidersHorizontal, RotateCw, Focus, Eye, FlipHorizontal, FlipVertical, RotateCcw, Pencil, Eraser, Highlighter, ZoomIn, ZoomOut } from "lucide-react";
+import { Layers, Crop as CropIcon, Image as ImageIcon, Download, ScanText, X, Wand2, CreditCard, Undo, Redo, Minimize2, FileType, ArrowUpDown, Palette, SlidersHorizontal, RotateCw, Focus, Eye, FlipHorizontal, FlipVertical, RotateCcw, Pencil, Eraser, Highlighter, ZoomIn, ZoomOut, Hand } from "lucide-react";
 import clsx from "clsx";
 import Cropper from "react-easy-crop";
 import { removeBg, extractText, compressImage } from "@/lib/image-processing";
@@ -11,7 +11,7 @@ import getCroppedImg from "@/lib/crop-utils";
 import { useHistory } from "@/hooks/useHistory";
 import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, type FilterName } from "@/lib/image-effects";
 
-type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "adjust" | "transform" | "blur" | "redeye" | "draw";
+type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand";
 type DrawingMode = "pen" | "highlighter" | "eraser";
 
 type ImageState = {
@@ -31,6 +31,11 @@ export function Editor() {
 
     // View Zoom State (for image display)
     const [viewZoom, setViewZoom] = useState(100);
+
+    // Pan State
+    const [pan, setPan] = useState({ x: 0, y: 0 });
+    const [isPanning, setIsPanning] = useState(false);
+    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
     // OCR State
     const [extractedText, setExtractedText] = useState("");
@@ -138,6 +143,16 @@ export function Editor() {
         setBackImage(temp);
     };
 
+    // Clear drawing canvas when image changes (e.g. undo/redo) to prevent ghost strokes
+    useEffect(() => {
+        if (activeTool === 'draw' && canvasRef.current) {
+            const ctx = canvasRef.current.getContext('2d');
+            if (ctx) {
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+            }
+        }
+    }, [currentImage, activeTool]);
+
     const handleBgRemove = async () => {
         if (!imageState?.src) return;
         setIsProcessing(true);
@@ -239,31 +254,120 @@ export function Editor() {
         }
     };
 
-    const handleDownload = () => {
+    const handleDownload = async () => {
         if (!currentImage) return;
 
-        // Convert data URL to blob for better download handling
-        fetch(currentImage)
-            .then(res => res.blob())
-            .then(blob => {
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = `lumiere-edit-${Date.now()}.png`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
-            })
-            .catch(() => {
-                // Fallback to direct data URL download
-                const link = document.createElement("a");
-                link.href = currentImage;
-                link.download = `lumiere-edit-${Date.now()}.png`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+        // Helper function to convert data URL to Blob
+        const dataURLtoBlob = (dataUrl: string): Blob => {
+            const arr = dataUrl.split(',');
+            const mimeMatch = arr[0].match(/:(.*?);/);
+            const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+            const bstr = atob(arr[1]);
+            let n = bstr.length;
+            const u8arr = new Uint8Array(n);
+            while (n--) {
+                u8arr[n] = bstr.charCodeAt(n);
+            }
+            return new Blob([u8arr], { type: mime });
+        };
+
+        // Helper to convert any image URL to data URL via canvas
+        const toDataURL = async (imageUrl: string): Promise<string> => {
+            if (imageUrl.startsWith('data:')) {
+                return imageUrl;
+            }
+            // For blob URLs or other URLs, convert via canvas
+            return new Promise<string>((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(img, 0, 0);
+                        resolve(canvas.toDataURL('image/png'));
+                    } else {
+                        reject(new Error('Canvas context failed'));
+                    }
+                };
+                img.onerror = () => reject(new Error('Image load failed'));
+                img.src = imageUrl;
             });
+        };
+
+        // Fallback download function for browsers without File System Access API
+        const fallbackDownload = (blob: Blob, filename: string) => {
+            const blobUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = filename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        };
+
+        try {
+            // First ensure we have a data URL
+            const dataUrl = await toDataURL(currentImage);
+
+            // Determine file extension and mime type from data URL
+            let extension = 'png';
+            let mimeType = 'image/png';
+            if (dataUrl.startsWith('data:image/')) {
+                const mimeMatch = dataUrl.match(/data:image\/(\w+)/);
+                if (mimeMatch) {
+                    extension = mimeMatch[1] === 'jpeg' ? 'jpg' : mimeMatch[1];
+                    mimeType = `image/${mimeMatch[1]}`;
+                }
+            }
+
+            const defaultFilename = `lumin-edit-${Date.now()}.${extension}`;
+
+            // Convert data URL to Blob
+            const blob = dataURLtoBlob(dataUrl);
+
+            // Check if File System Access API is available (Chrome/Edge)
+            if ('showSaveFilePicker' in window) {
+                try {
+                    const fileHandle = await (window as any).showSaveFilePicker({
+                        suggestedName: defaultFilename,
+                        types: [
+                            {
+                                description: 'Image Files',
+                                accept: {
+                                    [mimeType]: [`.${extension}`],
+                                    'image/png': ['.png'],
+                                    'image/jpeg': ['.jpg', '.jpeg'],
+                                    'image/webp': ['.webp'],
+                                },
+                            },
+                        ],
+                    });
+
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(blob);
+                    await writable.close();
+                } catch (err: any) {
+                    // User cancelled the save dialog
+                    if (err.name === 'AbortError') {
+                        return;
+                    }
+                    // Fallback if something else went wrong
+                    console.warn('File System Access API failed, using fallback:', err);
+                    fallbackDownload(blob, defaultFilename);
+                }
+            } else {
+                // Use fallback for browsers without File System Access API
+                fallbackDownload(blob, defaultFilename);
+            }
+        } catch (error) {
+            console.error('Download failed:', error);
+            alert('Download failed. Please try again.');
+        }
     };
 
     // Filter handler
@@ -400,11 +504,19 @@ export function Editor() {
         if (drawingMode === 'eraser') {
             ctx.globalCompositeOperation = 'destination-out';
             ctx.strokeStyle = 'rgba(0,0,0,1)';
+            ctx.globalAlpha = 1;
         } else if (drawingMode === 'highlighter') {
+            // Convert hex to rgba with transparency for highlighter effect
+            const hex = brushColor.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+
+            // source-over works better for a digital highlighter feel than multiply
             ctx.globalCompositeOperation = 'source-over';
-            ctx.strokeStyle = brushColor;
-            ctx.globalAlpha = 0.3;
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.5)`; // 50% opacity
             ctx.lineWidth = brushSize * 3;
+            // Removed globalAlpha override as we're using rgba
         } else {
             ctx.globalCompositeOperation = 'source-over';
             ctx.strokeStyle = brushColor;
@@ -422,11 +534,6 @@ export function Editor() {
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-
-        // Re-apply settings for highlighter mode
-        if (drawingMode === 'highlighter') {
-            ctx.globalAlpha = 0.3;
-        }
 
         ctx.lineTo(x, y);
         ctx.stroke();
@@ -501,6 +608,13 @@ export function Editor() {
                         onClick={() => setActiveTool("crop")}
                         icon={<CropIcon />}
                         label="Crop & Resize"
+                        disabled={!imageState}
+                    />
+                    <ToolButton
+                        active={activeTool === "hand"}
+                        onClick={() => setActiveTool("hand")}
+                        icon={<Hand />}
+                        label="Pan Tool"
                         disabled={!imageState}
                     />
                     <ToolButton
@@ -635,7 +749,33 @@ export function Editor() {
                                 />
                             </div>
                         ) : (
-                            <div className="relative transition-transform" style={{ transform: `scale(${viewZoom / 100})` }}>
+                            <div
+                                className={clsx(
+                                    "relative transition-transform duration-75 ease-linear will-change-transform",
+                                    activeTool === "hand" ? (isPanning ? "cursor-grabbing" : "cursor-grab") : ""
+                                )}
+                                style={{
+                                    transform: `scale(${viewZoom / 100}) translate(${pan.x}px, ${pan.y}px)`
+                                }}
+                                onMouseDown={(e) => {
+                                    if (activeTool === "hand") {
+                                        e.preventDefault();
+                                        setIsPanning(true);
+                                        setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+                                    }
+                                }}
+                                onMouseMove={(e) => {
+                                    if (activeTool === "hand" && isPanning) {
+                                        e.preventDefault();
+                                        setPan({
+                                            x: e.clientX - dragStart.x,
+                                            y: e.clientY - dragStart.y
+                                        });
+                                    }
+                                }}
+                                onMouseUp={() => setIsPanning(false)}
+                                onMouseLeave={() => setIsPanning(false)}
+                            >
                                 <img
                                     ref={imageRef}
                                     src={currentImage || ""}

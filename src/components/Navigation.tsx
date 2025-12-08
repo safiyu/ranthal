@@ -18,7 +18,7 @@ export function Navigation() {
                     <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 shadow-lg shadow-white/5 transition-transform group-hover:scale-105">
                         <Aperture className="h-5 w-5 text-white" />
                     </div>
-                    <span className="text-xl font-bold tracking-tight text-white/90">Lumiere</span>
+                    <span className="text-xl font-bold tracking-tight text-white/90">Lumin</span>
                 </Link>
 
                 {/* Links */}
