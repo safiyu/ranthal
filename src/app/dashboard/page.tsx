@@ -67,6 +67,12 @@ export default async function DashboardPage() {
                                     </span>
                                 </div>
                                 <div className="flex justify-end gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Link
+                                        href={`/editor?image=${encodeURIComponent(edit.resultUrl)}`}
+                                        className="text-xs bg-teal-500 text-white px-3 py-1.5 rounded-md font-bold"
+                                    >
+                                        Edit
+                                    </Link>
                                     <a
                                         href={edit.resultUrl}
                                         download

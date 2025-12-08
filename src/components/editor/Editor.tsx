@@ -1,10 +1,51 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback, useTransition } from "react";
 import { useDropzone } from "react-dropzone";
-import { Layers, Crop as CropIcon, Image as ImageIcon, Download, ScanText, X, Wand2, CreditCard, Undo, Redo, Minimize2, FileType, ArrowUpDown, Palette, SlidersHorizontal, RotateCw, Focus, Eye, FlipHorizontal, FlipVertical, RotateCcw, Pencil, Eraser, Highlighter, ZoomIn, ZoomOut, Hand } from "lucide-react";
+import Cropper, { Area } from "react-easy-crop";
+import {
+    Crop as CropIcon,
+    Download,
+    Eye,
+    EyeOff,
+    FileType,
+    ImageIcon,
+    Layers,
+    Minimize2,
+    Minus,
+    Plus,
+    Redo,
+    RefreshCw,
+    ScanText,
+    Settings,
+    Type,
+    Undo,
+    Upload,
+    Wand2,
+    X,
+    ZoomIn,
+    ZoomOut,
+    CreditCard,
+    Hand,
+    Filter,
+    Sun,
+    Image as ImageIconLucide,
+    Save,
+    Palette,
+    SlidersHorizontal,
+    RotateCw,
+    RotateCcw,
+    FlipHorizontal,
+    FlipVertical,
+    Pencil,
+    Highlighter,
+    Eraser,
+    ArrowUpDown,
+    Focus
+} from "lucide-react";
+import { saveEdit } from "@/app/actions";
+import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
-import Cropper from "react-easy-crop";
 import { removeBg, extractText, compressImage } from "@/lib/image-processing";
 import { createIDCard } from "@/lib/id-card-utils";
 import getCroppedImg from "@/lib/crop-utils";
@@ -17,6 +58,20 @@ type DrawingMode = "pen" | "highlighter" | "eraser";
 type ImageState = {
     src: string;
     processedSrc: string | null;
+};
+
+// Helper to convert data URL to Blob
+const dataURLtoBlob = (dataUrl: string): Blob => {
+    const arr = dataUrl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
 };
 
 export function Editor() {
@@ -68,9 +123,12 @@ export function Editor() {
     const [drawingMode, setDrawingMode] = useState<DrawingMode>("pen");
     const [brushColor, setBrushColor] = useState("#ff0000");
     const [brushSize, setBrushSize] = useState(5);
+    const [highlighterOpacity, setHighlighterOpacity] = useState(0.5);
     const [isDrawing, setIsDrawing] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const tempCanvasRef = useRef<HTMLCanvasElement>(null);
     const imageRef = useRef<HTMLImageElement>(null);
+    const activeStrokePoints = useRef<{ x: number, y: number }[]>([]);
 
     // CSS Filter string for real-time preview
     const getPreviewFilter = () => {
@@ -254,6 +312,62 @@ export function Editor() {
         }
     };
 
+    const [isSaving, startTransition] = useTransition();
+    const router = useRouter();
+    const searchParams = useSearchParams();
+
+    // Load initial image from query param
+    useEffect(() => {
+        const imageUrl = searchParams.get("image");
+        if (imageUrl) {
+            // If we have a URL and it's different from current, load it
+            // This also handles the initial load when imageState is null
+            if (!imageState || imageState.src !== imageUrl) {
+                pushState({
+                    src: imageUrl,
+                    processedSrc: null
+                });
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams]);
+
+    const handleSave = async () => {
+        if (!currentImage) return;
+
+        startTransition(async () => {
+            try {
+                // Determine file extension and mime type from data URL
+                let extension = 'png';
+                let mimeType = 'image/png';
+                if (currentImage.startsWith('data:image/')) {
+                    const mimeMatch = currentImage.match(/data:image\/(\w+)/);
+                    if (mimeMatch) {
+                        extension = mimeMatch[1] === 'jpeg' ? 'jpg' : mimeMatch[1];
+                        mimeType = `image/${mimeMatch[1]}`;
+                    }
+                }
+
+                const blob = dataURLtoBlob(currentImage);
+                const file = new File([blob], `edit.${extension}`, { type: mimeType });
+
+                const formData = new FormData();
+                formData.append("resultImage", file);
+                formData.append("originalUrl", imageState?.src || "");
+                formData.append("toolUsed", activeTool || "unknown");
+
+                const result = await saveEdit(formData);
+                if (result.success) {
+                    alert("Project saved successfully!");
+                    router.refresh();
+                }
+            } catch (error) {
+                console.error("Failed to save:", error);
+                alert("Failed to save project.");
+            }
+        });
+    };
+
     const handleDownload = async () => {
         if (!currentImage) return;
 
@@ -325,7 +439,7 @@ export function Editor() {
                 }
             }
 
-            const defaultFilename = `lumin-edit-${Date.now()}.${extension}`;
+            const defaultFilename = `ranthal-edit-${Date.now()}.${extension}`;
 
             // Convert data URL to Blob
             const blob = dataURLtoBlob(dataUrl);
@@ -505,22 +619,26 @@ export function Editor() {
             ctx.globalCompositeOperation = 'destination-out';
             ctx.strokeStyle = 'rgba(0,0,0,1)';
             ctx.globalAlpha = 1;
+            ctx.lineCap = 'round';
         } else if (drawingMode === 'highlighter') {
-            // Convert hex to rgba with transparency for highlighter effect
+            // Convert hex to rgba
             const hex = brushColor.replace('#', '');
             const r = parseInt(hex.substring(0, 2), 16);
             const g = parseInt(hex.substring(2, 4), 16);
             const b = parseInt(hex.substring(4, 6), 16);
 
-            // source-over works better for a digital highlighter feel than multiply
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.5)`; // 50% opacity
+            // Multiply blending gives a realistic highlighter effect on white paper
+            ctx.globalCompositeOperation = 'multiply';
+
+            // Use opacity from state
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${highlighterOpacity})`;
             ctx.lineWidth = brushSize * 3;
-            // Removed globalAlpha override as we're using rgba
+            ctx.lineCap = 'butt'; // Flat end for marker feel
         } else {
             ctx.globalCompositeOperation = 'source-over';
             ctx.strokeStyle = brushColor;
             ctx.globalAlpha = 1;
+            ctx.lineCap = 'round';
         }
     };
 
@@ -535,20 +653,92 @@ export function Editor() {
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        ctx.lineTo(x, y);
-        ctx.stroke();
+        if (drawingMode === 'eraser') {
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            return;
+        }
+
+        // Add point to stroke
+        activeStrokePoints.current.push({ x, y });
+
+        // Draw active stroke on temp canvas
+        const tempCanvas = tempCanvasRef.current;
+        if (!tempCanvas) return;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (!tempCtx) return;
+
+        // Clear temp canvas
+        tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+        // Draw solid stroke
+        tempCtx.beginPath();
+        const points = activeStrokePoints.current;
+        if (points.length < 2) return;
+
+        tempCtx.moveTo(points[0].x, points[0].y);
+
+        // Use quadratic curves for smoother lines
+        for (let i = 1; i < points.length - 1; i++) {
+            const xc = (points[i].x + points[i + 1].x) / 2;
+            const yc = (points[i].y + points[i + 1].y) / 2;
+            tempCtx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+        }
+        // Connect to last point
+        const last = points[points.length - 1];
+        tempCtx.lineTo(last.x, last.y);
+
+        // Styles for solid stroke (opacity handled by CSS on canvas element)
+        tempCtx.strokeStyle = brushColor;
+        tempCtx.lineWidth = drawingMode === 'highlighter' ? brushSize * 3 : brushSize;
+        tempCtx.lineCap = drawingMode === 'highlighter' ? 'butt' : 'round';
+        tempCtx.lineJoin = 'round';
+        tempCtx.stroke();
     };
 
     const stopDrawing = () => {
         setIsDrawing(false);
         const canvas = canvasRef.current;
+        const tempCanvas = tempCanvasRef.current;
+
         if (canvas) {
             const ctx = canvas.getContext('2d');
             if (ctx) {
-                ctx.globalAlpha = 1;
-                ctx.globalCompositeOperation = 'source-over';
+                // If we were using temp canvas (pen/highlighter), composite it now
+                if (drawingMode !== 'eraser' && tempCanvas) {
+                    const tempCtx = tempCanvas.getContext('2d');
+
+                    if (drawingMode === 'highlighter') {
+                        // Apply multiply blend for highlighter
+                        ctx.globalCompositeOperation = 'multiply';
+                        ctx.globalAlpha = highlighterOpacity;
+
+                        // For highlighter we need to reconstruct the rgba color
+                        // because canvas.drawImage ignores strokeStyle
+                        // But wait - the temp canvas already has the COLOR.
+                        // We just need to apply the alpha and blend mode.
+                    } else {
+                        ctx.globalCompositeOperation = 'source-over';
+                        ctx.globalAlpha = 1;
+                    }
+
+                    // Draw the solid stroke from temp canvas onto main canvas
+                    ctx.drawImage(tempCanvas, 0, 0);
+
+                    // Clear temp canvas
+                    if (tempCtx) tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+                    // Reset context
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.globalAlpha = 1;
+                } else {
+                    // Reset eraser context
+                    ctx.globalAlpha = 1;
+                    ctx.globalCompositeOperation = 'source-over';
+                }
             }
         }
+        activeStrokePoints.current = [];
     };
 
     const clearDrawing = () => {
@@ -637,13 +827,6 @@ export function Editor() {
                         disabled={!imageState}
                     />
                     <ToolButton
-                        active={activeTool === "ocr"}
-                        onClick={handleOcr}
-                        icon={<ScanText />}
-                        label="Extract Text"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
                         active={activeTool === "compress"}
                         onClick={() => setActiveTool("compress")}
                         icon={<Minimize2 />}
@@ -690,6 +873,13 @@ export function Editor() {
                         onClick={() => setActiveTool("draw")}
                         icon={<Pencil />}
                         label="Draw"
+                        disabled={!imageState}
+                    />
+                    <ToolButton
+                        active={activeTool === "ocr"}
+                        onClick={handleOcr}
+                        icon={<ScanText />}
+                        label="Extract Text"
                         disabled={!imageState}
                     />
                 </div>
@@ -784,449 +974,493 @@ export function Editor() {
                                     style={{ filter: getPreviewFilter() }}
                                 />
                                 {activeTool === "draw" && (
-                                    <canvas
-                                        ref={canvasRef}
-                                        width={imageRef.current?.clientWidth || 800}
-                                        height={imageRef.current?.clientHeight || 600}
-                                        className="absolute inset-0 cursor-crosshair"
-                                        onMouseDown={startDrawing}
-                                        onMouseMove={draw}
-                                        onMouseUp={stopDrawing}
-                                        onMouseLeave={stopDrawing}
-                                    />
+                                    <>
+                                        <canvas
+                                            ref={canvasRef}
+                                            width={imageRef.current?.clientWidth || 800}
+                                            height={imageRef.current?.clientHeight || 600}
+                                            className="absolute inset-0 cursor-crosshair"
+                                            onMouseDown={startDrawing}
+                                            onMouseMove={draw}
+                                            onMouseUp={stopDrawing}
+                                            onMouseLeave={stopDrawing}
+                                        />
+                                        <canvas
+                                            ref={tempCanvasRef}
+                                            width={imageRef.current?.clientWidth || 800}
+                                            height={imageRef.current?.clientHeight || 600}
+                                            className="absolute inset-0 pointer-events-none"
+                                            style={{
+                                                opacity: drawingMode === 'highlighter' ? highlighterOpacity : 1,
+                                                mixBlendMode: drawingMode === 'highlighter' ? 'multiply' : 'normal'
+                                            }}
+                                        />
+                                    </>
                                 )}
                             </div>
                         )}
+                    </div>
+                )}
 
-                        {isProcessing && (
-                            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                                <div className="flex flex-col items-center">
-                                    <Wand2 className="h-8 w-8 text-white animate-spin mb-2" />
-                                    <p className="text-white font-medium">Processing...</p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Action Buttons (Top Right) */}
-                        <div className="absolute top-4 right-4 flex gap-2 z-40">
-                            <button
-                                onClick={handleDownload}
-                                className="flex items-center gap-2 px-4 py-2 rounded-full bg-white text-black hover:bg-slate-200 font-medium transition-colors shadow-lg"
-                                title="Download"
-                            >
-                                <Download className="h-4 w-4" />
-                                <span className="hidden sm:inline">Download</span>
-                            </button>
-                            <button
-                                onClick={() => pushState(null)}
-                                className="p-2 rounded-full bg-black/50 text-white hover:bg-black/70 backdrop-blur-md transition-colors"
-                                title="Close / Reset"
-                            >
-                                <X className="h-5 w-5" />
-                            </button>
+                {isProcessing && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                        <div className="flex flex-col items-center">
+                            <Wand2 className="h-8 w-8 text-white animate-spin mb-2" />
+                            <p className="text-white font-medium">Processing...</p>
                         </div>
                     </div>
                 )}
+
+                {/* Action Buttons (Top Right) */}
+                <div className="absolute top-4 right-4 flex gap-2 z-40">
+                    <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="flex items-center gap-2 px-4 py-2 rounded-full bg-teal-500 text-white hover:bg-teal-600 font-medium transition-colors shadow-lg disabled:opacity-50"
+                        title="Save Project"
+                    >
+                        {isSaving ? <Wand2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        <span className="hidden sm:inline">{isSaving ? 'Saving...' : 'Save Project'}</span>
+                    </button>
+                    <button
+                        onClick={handleDownload}
+                        className="flex items-center gap-2 px-4 py-2 rounded-full bg-white text-black hover:bg-slate-200 font-medium transition-colors shadow-lg"
+                        title="Download"
+                    >
+                        <Download className="h-4 w-4" />
+                        <span className="hidden sm:inline">Download</span>
+                    </button>
+                    <button
+                        onClick={() => pushState(null)}
+                        className="p-2 rounded-full bg-black/50 text-white hover:bg-black/70 backdrop-blur-md transition-colors"
+                        title="Close / Reset"
+                    >
+                        <X className="h-5 w-5" />
+                    </button>
+                </div>
             </div>
 
+
+
             {/* Properties Panel (Right side) */}
-            {(activeTool === "crop" || activeTool === "ocr" || activeTool === "compress" || activeTool === "id-card" || activeTool === "convert" || activeTool === "filters" || activeTool === "adjust" || activeTool === "transform" || activeTool === "blur" || activeTool === "redeye" || activeTool === "draw") && (
-                <div className="w-80 border-l border-white/10 bg-black/20 p-4 glass-panel z-20 flex flex-col transition-all overflow-y-auto">
-                    <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-white font-bold">
-                            {activeTool === "crop" ? "Crop Settings" :
-                                activeTool === "ocr" ? "Extracted Text" :
-                                    activeTool === "compress" ? "Compression" :
-                                        activeTool === "convert" ? "Format Conversion" :
-                                            activeTool === "filters" ? "Filters" :
-                                                activeTool === "adjust" ? "Adjustments" :
-                                                    activeTool === "transform" ? "Transform" :
-                                                        activeTool === "blur" ? "Blur / Sharpen" :
-                                                            activeTool === "redeye" ? "Red-eye Fix" :
-                                                                activeTool === "draw" ? "Draw" :
-                                                                    "ID Card A4 Layout"}
-                        </h3>
-                        <button
-                            onClick={() => setActiveTool(null)}
-                            className="text-slate-400 hover:text-white"
-                        >
-                            <X className="h-4 w-4" />
-                        </button>
-                    </div>
-
-                    {activeTool === "id-card" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">Combine front & back for A4 printing. The first image is set as the front.</p>
-
-                            {/* Front Image */}
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-2">Front Image</label>
-                                {frontImage ? (
-                                    <>
-                                        <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
-                                            <img src={frontImage} alt="Front" className="w-full h-full object-cover" style={{ transform: `scale(${frontScale / 100})` }} />
-                                            <button onClick={() => setFrontImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <X className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs text-slate-500 w-12">Size</span>
-                                            <input
-                                                type="range"
-                                                min={20}
-                                                max={150}
-                                                step={5}
-                                                value={frontScale}
-                                                onChange={(e) => setFrontScale(Number(e.target.value))}
-                                                className="flex-1 accent-teal-400"
-                                            />
-                                            <span className="text-xs text-white w-10 text-right">{frontScale}%</span>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div className="border border-dashed border-white/20 rounded-lg p-4 flex items-center justify-center text-slate-500 text-xs">
-                                        No front image selected
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Back Image */}
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-2">Back Image</label>
-                                {!backImage ? (
-                                    <div {...getBackImageProps()} className="border border-dashed border-white/20 rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
-                                        <input {...getBackImageInputProps()} />
-                                        <ImageIcon className="h-6 w-6 text-slate-500 mb-2" />
-                                        <span className="text-xs text-slate-400">Upload Back Image</span>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
-                                            <img src={backImage} alt="Back" className="w-full h-full object-cover" style={{ transform: `scale(${backScale / 100})` }} />
-                                            <button onClick={() => setBackImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <X className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs text-slate-500 w-12">Size</span>
-                                            <input
-                                                type="range"
-                                                min={20}
-                                                max={150}
-                                                step={5}
-                                                value={backScale}
-                                                onChange={(e) => setBackScale(Number(e.target.value))}
-                                                className="flex-1 accent-teal-400"
-                                            />
-                                            <span className="text-xs text-white w-10 text-right">{backScale}%</span>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-
-                            {/* Swap Button */}
-                            {frontImage && backImage && (
-                                <button onClick={handleSwapImages} className="w-full btn-secondary flex items-center justify-center gap-2">
-                                    <ArrowUpDown className="h-4 w-4" />
-                                    Swap Front & Back
-                                </button>
-                            )}
-
-                            <button onClick={handleCreateIDCard} disabled={!frontImage || !backImage} className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
-                                Create A4 ID Card
+            {
+                (activeTool === "crop" || activeTool === "ocr" || activeTool === "compress" || activeTool === "id-card" || activeTool === "convert" || activeTool === "filters" || activeTool === "adjust" || activeTool === "transform" || activeTool === "blur" || activeTool === "redeye" || activeTool === "draw") && (
+                    <div className="w-80 border-l border-white/10 bg-black/20 p-4 glass-panel z-20 flex flex-col transition-all overflow-y-auto">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-white font-bold">
+                                {activeTool === "crop" ? "Crop Settings" :
+                                    activeTool === "ocr" ? "Extracted Text" :
+                                        activeTool === "compress" ? "Compression" :
+                                            activeTool === "convert" ? "Format Conversion" :
+                                                activeTool === "filters" ? "Filters" :
+                                                    activeTool === "adjust" ? "Adjustments" :
+                                                        activeTool === "transform" ? "Transform" :
+                                                            activeTool === "blur" ? "Blur / Sharpen" :
+                                                                activeTool === "redeye" ? "Red-eye Fix" :
+                                                                    activeTool === "draw" ? "Draw" :
+                                                                        "ID Card A4 Layout"}
+                            </h3>
+                            <button
+                                onClick={() => setActiveTool(null)}
+                                className="text-slate-400 hover:text-white"
+                            >
+                                <X className="h-4 w-4" />
                             </button>
                         </div>
-                    )}
 
-                    {activeTool === "crop" && (
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-2">Zoom</label>
-                                <input
-                                    type="range"
-                                    min={1}
-                                    max={3}
-                                    step={0.1}
-                                    value={zoom}
-                                    onChange={(e) => setZoom(Number(e.target.value))}
-                                    className="w-full accent-white"
-                                />
-                            </div>
-                            <button onClick={handleCrop} className="w-full btn-primary">Apply Crop</button>
-                        </div>
-                    )}
+                        {activeTool === "id-card" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Combine front & back for A4 printing. The first image is set as the front.</p>
 
-                    {activeTool === "convert" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400 mb-2">Convert image format.</p>
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-2">Output Format</label>
-                                <select
-                                    value={selectedFormat}
-                                    onChange={(e) => setSelectedFormat(e.target.value as "png" | "jpeg" | "webp")}
-                                    className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/50"
-                                >
-                                    <option value="png">PNG</option>
-                                    <option value="jpeg">JPG</option>
-                                    <option value="webp">WebP</option>
-                                </select>
-                            </div>
-                            <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">Convert Image</button>
-                        </div>
-                    )}
-
-                    {activeTool === "ocr" && (
-                        <div className="flex-1 flex flex-col min-h-0">
-                            {isProcessing ? (
-                                <div className="flex flex-col items-center justify-center py-8">
-                                    <Wand2 className="h-6 w-6 text-white animate-spin mb-2" />
-                                    <p className="text-xs text-slate-400">Extracting text...</p>
-                                </div>
-                            ) : (
-                                <>
-                                    <textarea
-                                        className="flex-1 w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:border-white/50 mb-4"
-                                        value={extractedText}
-                                        readOnly
-                                        placeholder="Text will appear here..."
-                                    />
-                                    <button
-                                        className="w-full btn-secondary flex items-center justify-center gap-2"
-                                        onClick={() => { navigator.clipboard.writeText(extractedText) }}
-                                        disabled={!extractedText}
-                                    >
-                                        Copy to Clipboard
-                                    </button>
-                                </>
-                            )}
-                        </div>
-                    )}
-
-                    {activeTool === "compress" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">Reduce file size. Lower quality = smaller file.</p>
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs text-slate-400">Quality</label>
-                                    <span className="text-xs text-white font-medium">{compressionQuality}%</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min={10}
-                                    max={100}
-                                    step={5}
-                                    value={compressionQuality}
-                                    onChange={(e) => setCompressionQuality(Number(e.target.value))}
-                                    className="w-full accent-teal-400"
-                                />
-                                <div className="flex justify-between text-xs text-slate-500 mt-1">
-                                    <span>Smaller</span>
-                                    <span>Higher Quality</span>
-                                </div>
-                            </div>
-                            <button onClick={handleCompress} className="w-full btn-primary">Compress Image</button>
-                        </div>
-                    )}
-
-                    {activeTool === "filters" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">Apply preset image filters.</p>
-                            <div className="grid grid-cols-2 gap-2">
-                                {(['grayscale', 'sepia', 'vintage', 'warm', 'cool', 'highContrast', 'noir', 'fade'] as const).map((filter) => (
-                                    <button
-                                        key={filter}
-                                        onClick={() => setSelectedFilter(filter)}
-                                        className={clsx(
-                                            "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
-                                            selectedFilter === filter
-                                                ? "border-teal-400 bg-teal-500/20 text-teal-300"
-                                                : "border-white/10 text-slate-400 hover:bg-white/5"
-                                        )}
-                                    >
-                                        {filter.replace(/([A-Z])/g, ' $1').trim()}
-                                    </button>
-                                ))}
-                            </div>
-                            <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Filter</button>
-                        </div>
-                    )}
-
-                    {activeTool === "adjust" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">Adjust brightness, contrast, and saturation.</p>
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs text-slate-400">Brightness</label>
-                                    <span className="text-xs text-white font-medium">{brightness}%</span>
-                                </div>
-                                <input type="range" min={50} max={150} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="w-full accent-teal-400" />
-                            </div>
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs text-slate-400">Contrast</label>
-                                    <span className="text-xs text-white font-medium">{contrast}%</span>
-                                </div>
-                                <input type="range" min={50} max={150} value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="w-full accent-teal-400" />
-                            </div>
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs text-slate-400">Saturation</label>
-                                    <span className="text-xs text-white font-medium">{saturation}%</span>
-                                </div>
-                                <input type="range" min={0} max={200} value={saturation} onChange={(e) => setSaturation(Number(e.target.value))} className="w-full accent-teal-400" />
-                            </div>
-                            <button onClick={handleApplyAdjustments} className="w-full btn-primary">Apply Adjustments</button>
-                        </div>
-                    )}
-
-                    {activeTool === "transform" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">Rotate and flip your image.</p>
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={() => handleRotate(270)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                    <RotateCcw className="h-4 w-4" />
-                                    <span className="text-xs">Left 90°</span>
-                                </button>
-                                <button onClick={() => handleRotate(90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                    <RotateCw className="h-4 w-4" />
-                                    <span className="text-xs">Right 90°</span>
-                                </button>
-                                <button onClick={() => handleFlip('horizontal')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                    <FlipHorizontal className="h-4 w-4" />
-                                    <span className="text-xs">Flip H</span>
-                                </button>
-                                <button onClick={() => handleFlip('vertical')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                    <FlipVertical className="h-4 w-4" />
-                                    <span className="text-xs">Flip V</span>
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeTool === "blur" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">Apply blur or sharpen effect.</p>
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs text-slate-400">Blur Amount</label>
-                                    <span className="text-xs text-white font-medium">{blurAmount}px</span>
-                                </div>
-                                <input type="range" min={0} max={20} value={blurAmount} onChange={(e) => setBlurAmount(Number(e.target.value))} className="w-full accent-teal-400" />
-                            </div>
-                            <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">Apply Blur</button>
-                            <div className="border-t border-white/10 pt-4">
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs text-slate-400">Sharpen Amount</label>
-                                    <span className="text-xs text-white font-medium">{sharpenAmount}%</span>
-                                </div>
-                                <input type="range" min={0} max={100} value={sharpenAmount} onChange={(e) => setSharpenAmount(Number(e.target.value))} className="w-full accent-teal-400" />
-                            </div>
-                            <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">Apply Sharpen</button>
-                        </div>
-                    )}
-
-                    {activeTool === "redeye" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">Click the button to automatically detect and fix red-eye in the center area of the image.</p>
-                            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-                                <p className="text-xs text-yellow-400">Note: This is a simplified fix that targets the upper-center area where faces typically appear.</p>
-                            </div>
-                            <button onClick={handleRedEyeFix} className="w-full btn-primary">Fix Red-eye</button>
-                        </div>
-                    )}
-
-                    {activeTool === "draw" && (
-                        <div className="space-y-4">
-                            <p className="text-xs text-slate-400">Draw on your image with pen, highlighter, or eraser.</p>
-
-                            {/* Drawing Mode Selection */}
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-2">Tool</label>
-                                <div className="grid grid-cols-3 gap-2">
-                                    <button
-                                        onClick={() => setDrawingMode('pen')}
-                                        className={clsx(
-                                            "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                            drawingMode === 'pen' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                        )}
-                                    >
-                                        <Pencil className="h-3 w-3" /> Pen
-                                    </button>
-                                    <button
-                                        onClick={() => setDrawingMode('highlighter')}
-                                        className={clsx(
-                                            "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                            drawingMode === 'highlighter' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                        )}
-                                    >
-                                        <Highlighter className="h-3 w-3" /> Highlight
-                                    </button>
-                                    <button
-                                        onClick={() => setDrawingMode('eraser')}
-                                        className={clsx(
-                                            "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                            drawingMode === 'eraser' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                        )}
-                                    >
-                                        <Eraser className="h-3 w-3" /> Eraser
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Color Picker */}
-                            {drawingMode !== 'eraser' && (
+                                {/* Front Image */}
                                 <div>
-                                    <label className="text-xs text-slate-400 block mb-2">Color</label>
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="color"
-                                            value={brushColor}
-                                            onChange={(e) => setBrushColor(e.target.value)}
-                                            className="w-10 h-10 rounded-lg border border-white/20 cursor-pointer bg-transparent"
-                                        />
-                                        <div className="flex gap-1">
-                                            {['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#000000'].map(color => (
-                                                <button
-                                                    key={color}
-                                                    onClick={() => setBrushColor(color)}
-                                                    className={clsx(
-                                                        "w-6 h-6 rounded-full border-2 transition-transform hover:scale-110",
-                                                        brushColor === color ? "border-white" : "border-white/20"
-                                                    )}
-                                                    style={{ backgroundColor: color }}
+                                    <label className="text-xs text-slate-400 block mb-2">Front Image</label>
+                                    {frontImage ? (
+                                        <>
+                                            <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
+                                                <img src={frontImage} alt="Front" className="w-full h-full object-cover" style={{ transform: `scale(${frontScale / 100})` }} />
+                                                <button onClick={() => setFrontImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <X className="h-3 w-3" />
+                                                </button>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-slate-500 w-12">Size</span>
+                                                <input
+                                                    type="range"
+                                                    min={20}
+                                                    max={150}
+                                                    step={5}
+                                                    value={frontScale}
+                                                    onChange={(e) => setFrontScale(Number(e.target.value))}
+                                                    className="flex-1 accent-teal-400"
                                                 />
-                                            ))}
+                                                <span className="text-xs text-white w-10 text-right">{frontScale}%</span>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="border border-dashed border-white/20 rounded-lg p-4 flex items-center justify-center text-slate-500 text-xs">
+                                            No front image selected
                                         </div>
+                                    )}
+                                </div>
+
+                                {/* Back Image */}
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-2">Back Image</label>
+                                    {!backImage ? (
+                                        <div {...getBackImageProps()} className="border border-dashed border-white/20 rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
+                                            <input {...getBackImageInputProps()} />
+                                            <ImageIcon className="h-6 w-6 text-slate-500 mb-2" />
+                                            <span className="text-xs text-slate-400">Upload Back Image</span>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
+                                                <img src={backImage} alt="Back" className="w-full h-full object-cover" style={{ transform: `scale(${backScale / 100})` }} />
+                                                <button onClick={() => setBackImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <X className="h-3 w-3" />
+                                                </button>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-slate-500 w-12">Size</span>
+                                                <input
+                                                    type="range"
+                                                    min={20}
+                                                    max={150}
+                                                    step={5}
+                                                    value={backScale}
+                                                    onChange={(e) => setBackScale(Number(e.target.value))}
+                                                    className="flex-1 accent-teal-400"
+                                                />
+                                                <span className="text-xs text-white w-10 text-right">{backScale}%</span>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
+                                {/* Swap Button */}
+                                {frontImage && backImage && (
+                                    <button onClick={handleSwapImages} className="w-full btn-secondary flex items-center justify-center gap-2">
+                                        <ArrowUpDown className="h-4 w-4" />
+                                        Swap Front & Back
+                                    </button>
+                                )}
+
+                                <button onClick={handleCreateIDCard} disabled={!frontImage || !backImage} className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+                                    Create A4 ID Card
+                                </button>
+                            </div>
+                        )}
+
+                        {activeTool === "crop" && (
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-2">Zoom</label>
+                                    <input
+                                        type="range"
+                                        min={1}
+                                        max={3}
+                                        step={0.1}
+                                        value={zoom}
+                                        onChange={(e) => setZoom(Number(e.target.value))}
+                                        className="w-full accent-white"
+                                    />
+                                </div>
+                                <button onClick={handleCrop} className="w-full btn-primary">Apply Crop</button>
+                            </div>
+                        )}
+
+                        {activeTool === "convert" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400 mb-2">Convert image format.</p>
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-2">Output Format</label>
+                                    <select
+                                        value={selectedFormat}
+                                        onChange={(e) => setSelectedFormat(e.target.value as "png" | "jpeg" | "webp")}
+                                        className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/50"
+                                    >
+                                        <option value="png">PNG</option>
+                                        <option value="jpeg">JPG</option>
+                                        <option value="webp">WebP</option>
+                                    </select>
+                                </div>
+                                <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">Convert Image</button>
+                            </div>
+                        )}
+
+                        {activeTool === "ocr" && (
+                            <div className="flex-1 flex flex-col min-h-0">
+                                {isProcessing ? (
+                                    <div className="flex flex-col items-center justify-center py-8">
+                                        <Wand2 className="h-6 w-6 text-white animate-spin mb-2" />
+                                        <p className="text-xs text-slate-400">Extracting text...</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <textarea
+                                            className="flex-1 w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:border-white/50 mb-4"
+                                            value={extractedText}
+                                            readOnly
+                                            placeholder="Text will appear here..."
+                                        />
+                                        <button
+                                            className="w-full btn-secondary flex items-center justify-center gap-2"
+                                            onClick={() => { navigator.clipboard.writeText(extractedText) }}
+                                            disabled={!extractedText}
+                                        >
+                                            Copy to Clipboard
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
+
+                        {activeTool === "compress" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Reduce file size. Lower quality = smaller file.</p>
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs text-slate-400">Quality</label>
+                                        <span className="text-xs text-white font-medium">{compressionQuality}%</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        min={10}
+                                        max={100}
+                                        step={5}
+                                        value={compressionQuality}
+                                        onChange={(e) => setCompressionQuality(Number(e.target.value))}
+                                        className="w-full accent-teal-400"
+                                    />
+                                    <div className="flex justify-between text-xs text-slate-500 mt-1">
+                                        <span>Smaller</span>
+                                        <span>Higher Quality</span>
                                     </div>
                                 </div>
-                            )}
+                                <button onClick={handleCompress} className="w-full btn-primary">Compress Image</button>
+                            </div>
+                        )}
 
-                            {/* Brush Size */}
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs text-slate-400">Brush Size</label>
-                                    <span className="text-xs text-white font-medium">{brushSize}px</span>
+                        {activeTool === "filters" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Apply preset image filters.</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {(['grayscale', 'sepia', 'vintage', 'warm', 'cool', 'highContrast', 'noir', 'fade'] as const).map((filter) => (
+                                        <button
+                                            key={filter}
+                                            onClick={() => setSelectedFilter(filter)}
+                                            className={clsx(
+                                                "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
+                                                selectedFilter === filter
+                                                    ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                    : "border-white/10 text-slate-400 hover:bg-white/5"
+                                            )}
+                                        >
+                                            {filter.replace(/([A-Z])/g, ' $1').trim()}
+                                        </button>
+                                    ))}
                                 </div>
-                                <input
-                                    type="range"
-                                    min={1}
-                                    max={30}
-                                    value={brushSize}
-                                    onChange={(e) => setBrushSize(Number(e.target.value))}
-                                    className="w-full accent-teal-400"
-                                />
+                                <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Filter</button>
                             </div>
+                        )}
 
-                            {/* Action Buttons */}
-                            <div className="flex gap-2">
-                                <button onClick={clearDrawing} className="flex-1 btn-secondary">Clear</button>
-                                <button onClick={applyDrawing} className="flex-1 btn-primary">Apply Drawing</button>
+                        {activeTool === "adjust" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Adjust brightness, contrast, and saturation.</p>
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs text-slate-400">Brightness</label>
+                                        <span className="text-xs text-white font-medium">{brightness}%</span>
+                                    </div>
+                                    <input type="range" min={50} max={150} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="w-full accent-teal-400" />
+                                </div>
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs text-slate-400">Contrast</label>
+                                        <span className="text-xs text-white font-medium">{contrast}%</span>
+                                    </div>
+                                    <input type="range" min={50} max={150} value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="w-full accent-teal-400" />
+                                </div>
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs text-slate-400">Saturation</label>
+                                        <span className="text-xs text-white font-medium">{saturation}%</span>
+                                    </div>
+                                    <input type="range" min={0} max={200} value={saturation} onChange={(e) => setSaturation(Number(e.target.value))} className="w-full accent-teal-400" />
+                                </div>
+                                <button onClick={handleApplyAdjustments} className="w-full btn-primary">Apply Adjustments</button>
                             </div>
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
+                        )}
+
+                        {activeTool === "transform" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Rotate and flip your image.</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={() => handleRotate(270)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                        <RotateCcw className="h-4 w-4" />
+                                        <span className="text-xs">Left 90°</span>
+                                    </button>
+                                    <button onClick={() => handleRotate(90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                        <RotateCw className="h-4 w-4" />
+                                        <span className="text-xs">Right 90°</span>
+                                    </button>
+                                    <button onClick={() => handleFlip('horizontal')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                        <FlipHorizontal className="h-4 w-4" />
+                                        <span className="text-xs">Flip H</span>
+                                    </button>
+                                    <button onClick={() => handleFlip('vertical')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                        <FlipVertical className="h-4 w-4" />
+                                        <span className="text-xs">Flip V</span>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTool === "blur" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Apply blur or sharpen effect.</p>
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs text-slate-400">Blur Amount</label>
+                                        <span className="text-xs text-white font-medium">{blurAmount}px</span>
+                                    </div>
+                                    <input type="range" min={0} max={20} value={blurAmount} onChange={(e) => setBlurAmount(Number(e.target.value))} className="w-full accent-teal-400" />
+                                </div>
+                                <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">Apply Blur</button>
+                                <div className="border-t border-white/10 pt-4">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs text-slate-400">Sharpen Amount</label>
+                                        <span className="text-xs text-white font-medium">{sharpenAmount}%</span>
+                                    </div>
+                                    <input type="range" min={0} max={100} value={sharpenAmount} onChange={(e) => setSharpenAmount(Number(e.target.value))} className="w-full accent-teal-400" />
+                                </div>
+                                <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">Apply Sharpen</button>
+                            </div>
+                        )}
+
+                        {activeTool === "redeye" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Click the button to automatically detect and fix red-eye in the center area of the image.</p>
+                                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+                                    <p className="text-xs text-yellow-400">Note: This is a simplified fix that targets the upper-center area where faces typically appear.</p>
+                                </div>
+                                <button onClick={handleRedEyeFix} className="w-full btn-primary">Fix Red-eye</button>
+                            </div>
+                        )}
+
+                        {activeTool === "draw" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Draw on your image with pen, highlighter, or eraser.</p>
+
+                                {/* Drawing Mode Selection */}
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-2">Tool</label>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <button
+                                            onClick={() => setDrawingMode('pen')}
+                                            className={clsx(
+                                                "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                drawingMode === 'pen' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                            )}
+                                        >
+                                            <Pencil className="h-3 w-3" /> Pen
+                                        </button>
+                                        <button
+                                            onClick={() => setDrawingMode('highlighter')}
+                                            className={clsx(
+                                                "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                drawingMode === 'highlighter' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                            )}
+                                        >
+                                            <Highlighter className="h-3 w-3" /> Highlight
+                                        </button>
+                                        <button
+                                            onClick={() => setDrawingMode('eraser')}
+                                            className={clsx(
+                                                "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                drawingMode === 'eraser' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                            )}
+                                        >
+                                            <Eraser className="h-3 w-3" /> Eraser
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Color Picker */}
+                                {drawingMode !== 'eraser' && (
+                                    <div>
+                                        <label className="text-xs text-slate-400 block mb-2">Color</label>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="color"
+                                                value={brushColor}
+                                                onChange={(e) => setBrushColor(e.target.value)}
+                                                className="w-10 h-10 rounded-lg border border-white/20 cursor-pointer bg-transparent"
+                                            />
+                                            <div className="flex gap-1">
+                                                {['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#000000'].map(color => (
+                                                    <button
+                                                        key={color}
+                                                        onClick={() => setBrushColor(color)}
+                                                        className={clsx(
+                                                            "w-6 h-6 rounded-full border-2 transition-transform hover:scale-110",
+                                                            brushColor === color ? "border-white" : "border-white/20"
+                                                        )}
+                                                        style={{ backgroundColor: color }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Brush Size */}
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs text-slate-400">Brush Size</label>
+                                        <span className="text-xs text-white font-medium">{brushSize}px</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        min={1}
+                                        max={30}
+                                        value={brushSize}
+                                        onChange={(e) => setBrushSize(Number(e.target.value))}
+                                        className="w-full accent-teal-400"
+                                    />
+                                </div>
+
+                                {/* Highlighter Opacity - Only show for highlighter */}
+                                {drawingMode === 'highlighter' && (
+                                    <div>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <label className="text-xs text-slate-400">Opacity</label>
+                                            <span className="text-xs text-white font-medium">{Math.round(highlighterOpacity * 100)}%</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={10}
+                                            max={100}
+                                            step={5}
+                                            value={highlighterOpacity * 100}
+                                            onChange={(e) => setHighlighterOpacity(Number(e.target.value) / 100)}
+                                            className="w-full accent-teal-400"
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Action Buttons */}
+                                <div className="flex gap-2">
+                                    <button onClick={clearDrawing} className="flex-1 btn-secondary">Clear</button>
+                                    <button onClick={applyDrawing} className="flex-1 btn-primary">Apply Drawing</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )
+            }
+        </div >
     );
 }
 

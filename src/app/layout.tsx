@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
 
 export const metadata: Metadata = {
-  title: "Lumin - Professional Image Editor",
+  title: "Ranthal - Professional Image Editor",
   description: "Next-gen AI Image Editor with background removal and ID card tools.",
 };
 

@@ -14,7 +14,7 @@
   --color-bg-card: #0a0a0a;
   --color-bg-card-hover: #171717;
 
-  --color-primary: #ffffff;
+  --color-primary: #14b8a6;
   --color-primary-hover: #e5e5e5;
 
   --color-text-main: #ffffff;
@@ -22,7 +22,7 @@
   --color-border: #27272a;
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #ffffff, #a1a1aa);
+  --gradient-primary: linear-gradient(135deg, #2dd4bf, #0d9488);
 
   /* Utils */
   --radius-sm: 8px;
