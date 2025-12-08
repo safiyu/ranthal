@@ -827,6 +827,13 @@ export function Editor() {
                         disabled={!imageState}
                     />
                     <ToolButton
+                        active={activeTool === "ocr"}
+                        onClick={handleOcr}
+                        icon={<ScanText />}
+                        label="Extract Text"
+                        disabled={!imageState}
+                    />
+                    <ToolButton
                         active={activeTool === "compress"}
                         onClick={() => setActiveTool("compress")}
                         icon={<Minimize2 />}
@@ -873,13 +880,6 @@ export function Editor() {
                         onClick={() => setActiveTool("draw")}
                         icon={<Pencil />}
                         label="Draw"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "ocr"}
-                        onClick={handleOcr}
-                        icon={<ScanText />}
-                        label="Extract Text"
                         disabled={!imageState}
                     />
                 </div>
