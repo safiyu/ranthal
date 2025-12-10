@@ -1,6 +1,6 @@
 // Image Effects Utility Functions
 
-type FilterName = 'grayscale' | 'sepia' | 'vintage' | 'warm' | 'cool' | 'highContrast' | 'noir' | 'fade';
+type FilterName = 'grayscale' | 'sepia' | 'vintage' | 'warm' | 'cool' | 'highContrast' | 'noir' | 'fade' | 'kodak' | 'technicolor' | 'polaroid' | 'dramatic' | 'golden' | 'cyberpunk' | 'clarendon' | 'gingham' | 'juno' | 'lark' | 'ludwig' | 'valencia' | 'moon' | 'reyes' | 'slumber' | 'crema' | 'aden' | 'perpetua';
 
 // Preset filter definitions
 const FILTER_PRESETS: Record<FilterName, string> = {
@@ -12,6 +12,24 @@ const FILTER_PRESETS: Record<FilterName, string> = {
     highContrast: 'contrast(150%) saturate(110%)',
     noir: 'grayscale(100%) contrast(120%) brightness(90%)',
     fade: 'contrast(80%) brightness(110%) saturate(80%)',
+    kodak: 'sepia(20%) saturate(160%) contrast(110%) brightness(105%)',
+    technicolor: 'saturate(200%) contrast(130%) hue-rotate(-10deg)',
+    polaroid: 'contrast(110%) brightness(110%) grayscale(20%) sepia(20%)',
+    dramatic: 'contrast(140%) grayscale(30%) brightness(90%)',
+    golden: 'sepia(40%) saturate(150%) brightness(110%) contrast(110%)',
+    cyberpunk: 'hue-rotate(180deg) saturate(200%) contrast(130%)',
+    clarendon: 'sepia(10%) contrast(120%) brightness(125%) saturate(135%)',
+    gingham: 'sepia(10%) hue-rotate(-10deg) brightness(105%) contrast(110%) saturate(80%)',
+    juno: 'sepia(30%) contrast(115%) brightness(110%) saturate(140%) hue-rotate(-10deg)',
+    lark: 'contrast(90%) brightness(120%) saturate(110%)',
+    ludwig: 'sepia(10%) contrast(105%) brightness(105%) saturate(180%)',
+    valencia: 'sepia(25%) contrast(108%) brightness(108%)',
+    moon: 'grayscale(100%) brightness(110%) contrast(110%)',
+    reyes: 'sepia(22%) brightness(110%) contrast(85%) saturate(75%)',
+    slumber: 'sepia(35%) contrast(125%) saturate(125%)',
+    crema: 'sepia(50%) contrast(125%) saturate(90%) hue-rotate(-2deg)',
+    aden: 'hue-rotate(-20deg) contrast(90%) saturate(85%) brightness(120%)',
+    perpetua: 'contrast(110%) brightness(110%) saturate(110%)',
 };
 
 /**

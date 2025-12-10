@@ -4,12 +4,27 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { LogOut } from "lucide-react";
+import { LogOut, User, ChevronDown } from "lucide-react";
 import { useSession, signOut } from "next-auth/react";
+import { AboutButton } from "@/components/AboutButton";
+import { useState, useEffect, useRef } from "react";
 
 export function Navigation() {
     const pathname = usePathname();
     const { data: session, status } = useSession();
+    const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const profileRef = useRef<HTMLDivElement>(null);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+                setIsProfileOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
 
     // Get first name only
     const getFirstName = (name: string | null | undefined) => {
@@ -18,20 +33,20 @@ export function Navigation() {
     };
 
     return (
-        <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-black/50 backdrop-blur-xl transition-all">
-            <div className="mx-auto flex h-16 items-center justify-between px-4 lg:px-8">
+        <nav className="fixed top-4 left-0 right-0 z-50 flex justify-center pointer-events-none">
+            <div className="mx-auto flex h-16 items-center justify-between px-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-page)]/70 backdrop-blur-xl shadow-2xl w-[95%] max-w-7xl pointer-events-auto transition-all hover:bg-[var(--color-bg-page)]/80 hover:border-white/10 group/nav">
                 {/* Logo - Left side */}
                 <Link href="/" className="flex items-center gap-2 group">
                     <div className="relative h-20 w-20 transition-transform group-hover:scale-105">
                         <Image
-                            src="/logos/22.png"
+                            src="/logos/11.png"
                             alt="Logo"
                             fill
                             className="object-contain"
                             priority
                         />
                     </div>
-                    <span className="text-xl font-bold tracking-tight text-white/90">Ranthal</span>
+                    <span className="text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-teal-100 to-teal-200 bg-clip-text text-transparent font-[family-name:var(--font-outfit)]">Ranthal</span>
                 </Link>
 
                 {/* Links - Center */}
@@ -42,21 +57,44 @@ export function Navigation() {
 
                 {/* Auth Buttons - Right side */}
                 <div className="flex items-center gap-4">
+                    <AboutButton />
                     {status === "loading" ? (
                         <div className="w-20 h-8 bg-white/10 rounded-full animate-pulse" />
                     ) : session?.user ? (
-                        <>
-                            <span className="text-sm text-white/70 hidden sm:block">
-                                {getFirstName(session.user.name) || session.user.email}
-                            </span>
+                        <div className="relative" ref={profileRef}>
                             <button
-                                onClick={() => signOut({ callbackUrl: '/' })}
-                                className="flex items-center gap-2 text-sm font-medium text-white/70 hover:text-white transition-colors"
+                                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                                className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/5 transition-all group"
                             >
-                                <LogOut className="h-4 w-4" />
-                                <span className="hidden sm:inline">Logout</span>
+                                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white font-bold shadow-lg">
+                                    {getFirstName(session.user.name).charAt(0).toUpperCase() || <User className="h-4 w-4" />}
+                                </div>
+                                <ChevronDown className={clsx("h-4 w-4 text-slate-400 transition-transform duration-200", isProfileOpen && "rotate-180")} />
                             </button>
-                        </>
+
+                            {/* Dropdown Menu */}
+                            {isProfileOpen && (
+                                <div className="absolute top-full right-0 mt-2 w-48 rounded-xl bg-[var(--color-bg-card)] border border-[var(--color-border)] shadow-xl overflow-hidden animate-scale-in origin-top-right backdrop-blur-xl">
+                                    <div className="px-4 py-3 border-b border-white/5 bg-white/5">
+                                        <p className="text-sm font-medium text-white truncate">
+                                            {session.user.name || "User"}
+                                        </p>
+                                        <p className="text-xs text-slate-400 truncate">
+                                            {session.user.email}
+                                        </p>
+                                    </div>
+                                    <div className="p-1">
+                                        <button
+                                            onClick={() => signOut({ callbackUrl: '/' })}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                        >
+                                            <LogOut className="h-4 w-4" />
+                                            Sign out
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     ) : (
                         <>
                             <Link
@@ -67,7 +105,7 @@ export function Navigation() {
                             </Link>
                             <Link
                                 href="/signup"
-                                className="rounded-full bg-white text-black px-5 py-2 text-sm font-bold transition-transform hover:scale-105 active:scale-95"
+                                className="btn-primary flex items-center gap-2 group"
                             >
                                 Sign up
                             </Link>
@@ -75,7 +113,10 @@ export function Navigation() {
                     )}
                 </div>
             </div>
-        </nav>
+
+            {/* Ambient Glow */}
+            <div className="absolute inset-0 -z-10 bg-gradient-to-r from-teal-500/10 via-cyan-500/10 to-blue-500/10 blur-3xl opacity-0 group-hover/nav:opacity-100 transition-opacity duration-700 rounded-2xl" />
+        </nav >
     );
 }
 
@@ -85,11 +126,15 @@ function NavLink({ href, current, children }: { href: string; current: string; c
         <Link
             href={href}
             className={clsx(
-                "text-sm font-medium transition-colors",
-                isActive ? "text-white" : "text-white/60 hover:text-white"
+                "relative px-4 py-2 text-sm font-medium transition-all rounded-full overflow-hidden group",
+                isActive ? "text-white" : "text-slate-400 hover:text-white"
             )}
         >
-            {children}
+            <span className="relative z-10">{children}</span>
+            {isActive && (
+                <span className="absolute inset-0 bg-white/10 rounded-full animate-fade-in" />
+            )}
+            <span className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-full" />
         </Link>
     );
 }

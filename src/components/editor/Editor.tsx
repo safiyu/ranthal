@@ -41,18 +41,22 @@ import {
     Highlighter,
     Eraser,
     ArrowUpDown,
-    Focus
+    Focus,
+    FileText
 } from "lucide-react";
 import { saveEdit } from "@/app/actions";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
-import { removeBg, extractText, compressImage } from "@/lib/image-processing";
+import { removeBg, extractText, compressImage, cancelBgRemoval, cancelOcr } from "@/lib/image-processing";
 import { createIDCard } from "@/lib/id-card-utils";
 import getCroppedImg from "@/lib/crop-utils";
 import { useHistory } from "@/hooks/useHistory";
 import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, type FilterName } from "@/lib/image-effects";
+import { useToast } from "@/components/Toast";
+import { jsPDF } from "jspdf";
+import EXIF from "exif-js";
 
-type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand";
+type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "social-filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand";
 type DrawingMode = "pen" | "highlighter" | "eraser";
 
 type ImageState = {
@@ -74,7 +78,20 @@ const dataURLtoBlob = (dataUrl: string): Blob => {
     return new Blob([u8arr], { type: mime });
 };
 
+// Helper to convert any image source to a Blob
+const imageToBlob = async (imageSrc: string): Promise<Blob> => {
+    // If it's already a data URL, use the existing method
+    if (imageSrc.startsWith('data:')) {
+        return dataURLtoBlob(imageSrc);
+    }
+
+    // Otherwise, fetch the image and convert to blob
+    const response = await fetch(imageSrc);
+    return await response.blob();
+};
+
 export function Editor() {
+    const { showToast } = useToast();
     const { state: imageState, pushState, undo, redo, canUndo, canRedo } = useHistory<ImageState | null>(null);
     const [activeTool, setActiveTool] = useState<Tool | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -105,7 +122,7 @@ export function Editor() {
     const [backScale, setBackScale] = useState(100); // % scale for back image
 
     // Format Conversion State
-    const [selectedFormat, setSelectedFormat] = useState<"png" | "jpeg" | "webp">("png");
+    const [selectedFormat, setSelectedFormat] = useState<"png" | "jpeg" | "webp" | "pdf">("png");
 
     // Filters State
     const [selectedFilter, setSelectedFilter] = useState<FilterName>("grayscale");
@@ -142,6 +159,55 @@ export function Editor() {
                 highContrast: 'contrast(150%) saturate(110%)',
                 noir: 'grayscale(100%) contrast(120%) brightness(90%)',
                 fade: 'contrast(80%) brightness(110%) saturate(80%)',
+                kodak: 'sepia(20%) saturate(160%) contrast(110%) brightness(105%)',
+                technicolor: 'saturate(200%) contrast(130%) hue-rotate(-10deg)',
+                polaroid: 'contrast(110%) brightness(110%) grayscale(20%) sepia(20%)',
+                dramatic: 'contrast(140%) grayscale(30%) brightness(90%)',
+                golden: 'sepia(40%) saturate(150%) brightness(110%) contrast(110%)',
+                cyberpunk: 'hue-rotate(180deg) saturate(200%) contrast(130%)',
+                clarendon: 'sepia(10%) contrast(120%) brightness(125%) saturate(135%)',
+                gingham: 'sepia(10%) hue-rotate(-10deg) brightness(105%) contrast(110%) saturate(80%)',
+                juno: 'sepia(30%) contrast(115%) brightness(110%) saturate(140%) hue-rotate(-10deg)',
+                lark: 'contrast(90%) brightness(120%) saturate(110%)',
+                ludwig: 'sepia(10%) contrast(105%) brightness(105%) saturate(180%)',
+                valencia: 'sepia(25%) contrast(108%) brightness(108%)',
+                moon: 'grayscale(100%) brightness(110%) contrast(110%)',
+                reyes: 'sepia(22%) brightness(110%) contrast(85%) saturate(75%)',
+                slumber: 'sepia(35%) contrast(125%) saturate(125%)',
+                crema: 'sepia(50%) contrast(125%) saturate(90%) hue-rotate(-2deg)',
+                aden: 'hue-rotate(-20deg) contrast(90%) saturate(85%) brightness(120%)',
+                perpetua: 'contrast(110%) brightness(110%) saturate(110%)',
+            };
+            return filterPresets[selectedFilter];
+        }
+        if (activeTool === "social-filters") {
+            const filterPresets: Record<FilterName, string> = {
+                grayscale: 'grayscale(100%)', // Fallbacks/Common
+                sepia: 'sepia(100%)',
+                vintage: 'sepia(50%) contrast(90%) brightness(90%)',
+                warm: 'sepia(30%) saturate(120%) brightness(105%)',
+                cool: 'saturate(80%) hue-rotate(20deg) brightness(95%)',
+                highContrast: 'contrast(150%) saturate(110%)',
+                noir: 'grayscale(100%) contrast(120%) brightness(90%)',
+                fade: 'contrast(80%) brightness(110%) saturate(80%)',
+                kodak: 'sepia(20%) saturate(160%) contrast(110%) brightness(105%)',
+                technicolor: 'saturate(200%) contrast(130%) hue-rotate(-10deg)',
+                polaroid: 'contrast(110%) brightness(110%) grayscale(20%) sepia(20%)',
+                dramatic: 'contrast(140%) grayscale(30%) brightness(90%)',
+                golden: 'sepia(40%) saturate(150%) brightness(110%) contrast(110%)',
+                cyberpunk: 'hue-rotate(180deg) saturate(200%) contrast(130%)',
+                clarendon: 'sepia(10%) contrast(120%) brightness(125%) saturate(135%)',
+                gingham: 'sepia(10%) hue-rotate(-10deg) brightness(105%) contrast(110%) saturate(80%)',
+                juno: 'sepia(30%) contrast(115%) brightness(110%) saturate(140%) hue-rotate(-10deg)',
+                lark: 'contrast(90%) brightness(120%) saturate(110%)',
+                ludwig: 'sepia(10%) contrast(105%) brightness(105%) saturate(180%)',
+                valencia: 'sepia(25%) contrast(108%) brightness(108%)',
+                moon: 'grayscale(100%) brightness(110%) contrast(110%)',
+                reyes: 'sepia(22%) brightness(110%) contrast(85%) saturate(75%)',
+                slumber: 'sepia(35%) contrast(125%) saturate(125%)',
+                crema: 'sepia(50%) contrast(125%) saturate(90%) hue-rotate(-2deg)',
+                aden: 'hue-rotate(-20deg) contrast(90%) saturate(85%) brightness(120%)',
+                perpetua: 'contrast(110%) brightness(110%) saturate(110%)',
             };
             return filterPresets[selectedFilter];
         }
@@ -219,7 +285,10 @@ export function Editor() {
             const newSrc = await removeBg(source);
             pushState({ ...imageState, processedSrc: newSrc });
         } catch (err) {
-            alert("Error removing background");
+            // Don't show error if operation was cancelled
+            if ((err as Error).message !== 'Operation cancelled') {
+                showToast("Error removing background", "error");
+            }
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -235,7 +304,7 @@ export function Editor() {
             setActiveTool(null);
         } catch (e) {
             console.error(e);
-            alert("Crop failed");
+            showToast("Crop failed", "error");
         } finally {
             setIsProcessing(false);
         }
@@ -248,7 +317,7 @@ export function Editor() {
             const newSrc = await createIDCard(frontImage, backImage, frontScale / 100, backScale / 100);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Error creating ID Card");
+            showToast("Error creating ID Card", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -266,20 +335,125 @@ export function Editor() {
             const newSrc = await compressImage(currentImage, compressionQuality / 100);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Compression failed");
+            showToast("Compression failed", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
         }
     }
 
-    const handleConvert = async (format: "png" | "jpeg" | "webp") => {
+    const handleConvert = async (format: "png" | "jpeg" | "webp" | "pdf") => {
         if (!currentImage) return;
         setIsProcessing(true);
         try {
             const img = new Image();
             img.src = currentImage;
             await new Promise((resolve) => { img.onload = resolve; });
+
+            // Handle PDF Export
+            if (format === "pdf") {
+                // Determine orientation based on EXIF data
+                // We use a temp canvas to "bake in" the rotation if needed
+                let sourceImage = img;
+                let srcWidth = img.width;
+                let srcHeight = img.height;
+
+                // Helper to get EXIF orientation
+                const getOrientation = (file: Blob): Promise<number> => {
+                    return new Promise((resolve) => {
+                        EXIF.getData(file as any, function (this: any) {
+                            const orientation = EXIF.getTag(this, "Orientation");
+                            resolve(orientation || 1);
+                        });
+                    });
+                };
+
+                const blob = dataURLtoBlob(currentImage);
+                const orientation = await getOrientation(blob);
+
+                // If orientation is not normal (1), draw to canvas to normalize it
+                if (orientation > 1) {
+                    const canvas = document.createElement("canvas");
+                    const ctx = canvas.getContext("2d");
+                    if (ctx) {
+                        const width = img.width;
+                        const height = img.height;
+
+                        if ([5, 6, 7, 8].includes(orientation)) {
+                            canvas.width = height;
+                            canvas.height = width;
+                        } else {
+                            canvas.width = width;
+                            canvas.height = height;
+                        }
+
+                        // Apply transforms based on orientation
+                        switch (orientation) {
+                            case 2: ctx.transform(-1, 0, 0, 1, width, 0); break;
+                            case 3: ctx.transform(-1, 0, 0, -1, width, height); break;
+                            case 4: ctx.transform(1, 0, 0, -1, 0, height); break;
+                            case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
+                            case 6: ctx.transform(0, 1, -1, 0, height, 0); break;
+                            case 7: ctx.transform(0, -1, -1, 0, height, width); break;
+                            case 8: ctx.transform(0, -1, 1, 0, 0, width); break;
+                            default: break;
+                        }
+
+                        ctx.drawImage(img, 0, 0);
+
+                        // Use this canvas as the source image
+                        // We convert back to image to easily use with jsPDF
+                        const normalizedData = canvas.toDataURL("image/png");
+                        const normalizedImg = new Image();
+                        normalizedImg.src = normalizedData;
+                        await new Promise(resolve => normalizedImg.onload = resolve);
+                        sourceImage = normalizedImg;
+                        srcWidth = normalizedImg.width;
+                        srcHeight = normalizedImg.height;
+                    }
+                }
+
+                // Determine PDF orientation based on (possibly normalized) image dimensions
+                const pdfOrientation = srcWidth > srcHeight ? 'l' : 'p';
+                const pdf = new jsPDF({
+                    orientation: pdfOrientation,
+                    unit: 'mm'
+                });
+
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+                const margin = 10;
+
+                // Calculate dimensions to fit within margins while maintaining aspect ratio
+                const maxWidth = pageWidth - (margin * 2);
+                const maxHeight = pageHeight - (margin * 2);
+
+                const imgRatio = srcWidth / srcHeight;
+                const pageRatio = maxWidth / maxHeight;
+
+                let finalWidth, finalHeight;
+
+                if (imgRatio > pageRatio) {
+                    // Image is wider than page area (relative to height)
+                    finalWidth = maxWidth;
+                    finalHeight = maxWidth / imgRatio;
+                } else {
+                    // Image is taller than page area (relative to width)
+                    finalHeight = maxHeight;
+                    finalWidth = maxHeight * imgRatio;
+                }
+
+                // Center the image
+                const x = (pageWidth - finalWidth) / 2;
+                const y = (pageHeight - finalHeight) / 2;
+
+                pdf.addImage(sourceImage, 'PNG', x, y, finalWidth, finalHeight);
+                pdf.save('image-converted.pdf');
+                showToast("PDF downloaded successfully", "success");
+                setIsProcessing(false);
+                setActiveTool(null);
+                return;
+            }
 
             const canvas = document.createElement("canvas");
             canvas.width = img.width;
@@ -291,7 +465,8 @@ export function Editor() {
                 pushState({ ...imageState!, processedSrc: newSrc });
             }
         } catch (e) {
-            alert("Conversion failed");
+            console.error(e);
+            showToast("Conversion failed", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -306,7 +481,10 @@ export function Editor() {
             const text = await extractText(currentImage);
             setExtractedText(text);
         } catch (error) {
-            alert("Failed to extract text");
+            // Don't show error if operation was cancelled
+            if ((error as Error).message !== 'Operation cancelled') {
+                showToast("Failed to extract text", "error");
+            }
         } finally {
             setIsProcessing(false);
         }
@@ -320,11 +498,15 @@ export function Editor() {
     useEffect(() => {
         const imageUrl = searchParams.get("image");
         if (imageUrl) {
-            // If we have a URL and it's different from current, load it
-            // This also handles the initial load when imageState is null
-            if (!imageState || imageState.src !== imageUrl) {
+            // Decode the URL (in case it was encoded)
+            const decodedUrl = decodeURIComponent(imageUrl);
+
+            // Always update if we have a URL in the query params
+            // This ensures the image loads when navigating from history
+            if (!imageState || imageState.src !== decodedUrl) {
+                console.log("Loading image from URL:", decodedUrl);
                 pushState({
-                    src: imageUrl,
+                    src: decodedUrl,
                     processedSrc: null
                 });
             }
@@ -337,19 +519,16 @@ export function Editor() {
 
         startTransition(async () => {
             try {
-                // Determine file extension and mime type from data URL
-                let extension = 'png';
-                let mimeType = 'image/png';
-                if (currentImage.startsWith('data:image/')) {
-                    const mimeMatch = currentImage.match(/data:image\/(\w+)/);
-                    if (mimeMatch) {
-                        extension = mimeMatch[1] === 'jpeg' ? 'jpg' : mimeMatch[1];
-                        mimeType = `image/${mimeMatch[1]}`;
-                    }
-                }
+                // Convert image to blob (handles both data URLs and regular URLs)
+                const blob = await imageToBlob(currentImage);
 
-                const blob = dataURLtoBlob(currentImage);
-                const file = new File([blob], `edit.${extension}`, { type: mimeType });
+                // Determine file extension from mime type
+                let extension = 'png';
+                if (blob.type === 'image/jpeg') extension = 'jpg';
+                else if (blob.type === 'image/webp') extension = 'webp';
+                else if (blob.type === 'image/gif') extension = 'gif';
+
+                const file = new File([blob], `edit.${extension}`, { type: blob.type });
 
                 const formData = new FormData();
                 formData.append("resultImage", file);
@@ -358,12 +537,12 @@ export function Editor() {
 
                 const result = await saveEdit(formData);
                 if (result.success) {
-                    alert("Project saved successfully!");
+                    showToast("Project saved successfully!", "success");
                     router.refresh();
                 }
             } catch (error) {
                 console.error("Failed to save:", error);
-                alert("Failed to save project.");
+                showToast("Failed to save project.", "error");
             }
         });
     };
@@ -492,7 +671,7 @@ export function Editor() {
             const newSrc = await applyFilter(currentImage, selectedFilter);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Failed to apply filter");
+            showToast("Failed to apply filter", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -507,7 +686,7 @@ export function Editor() {
             const newSrc = await applyAdjustments(currentImage, brightness, contrast, saturation);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Failed to apply adjustments");
+            showToast("Failed to apply adjustments", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -525,7 +704,7 @@ export function Editor() {
             const newSrc = await rotateImage(currentImage, angle);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Failed to rotate");
+            showToast("Failed to rotate", "error");
         } finally {
             setIsProcessing(false);
         }
@@ -539,7 +718,7 @@ export function Editor() {
             const newSrc = await flipImage(currentImage, direction);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Failed to flip");
+            showToast("Failed to flip", "error");
         } finally {
             setIsProcessing(false);
         }
@@ -553,7 +732,7 @@ export function Editor() {
             const newSrc = await applyBlur(currentImage, blurAmount);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Failed to apply blur");
+            showToast("Failed to apply blur", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -569,7 +748,7 @@ export function Editor() {
             const newSrc = await applySharpen(currentImage, sharpenAmount / 100);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Failed to sharpen");
+            showToast("Failed to sharpen", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -590,7 +769,7 @@ export function Editor() {
             const newSrc = await fixRedEye(currentImage, img.width / 2, img.height / 3, 50);
             pushState({ ...imageState!, processedSrc: newSrc });
         } catch (err) {
-            alert("Failed to fix red-eye");
+            showToast("Failed to fix red-eye", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -774,7 +953,7 @@ export function Editor() {
             pushState({ ...imageState!, processedSrc: canvas.toDataURL('image/png') });
             clearDrawing();
         } catch (err) {
-            alert("Failed to apply drawing");
+            showToast("Failed to apply drawing", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -782,112 +961,59 @@ export function Editor() {
     };
 
     return (
-        <div className="flex h-[calc(100vh-64px)]">
+        <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-[var(--color-bg-page)]">
             {/* Sidebar (Left) */}
-            <div className="w-20 lg:w-64 border-r border-white/10 bg-black/20 flex flex-col items-center lg:items-stretch py-4 z-10 glass-panel">
-                <div className="flex-1 space-y-2 px-2 lg:px-4">
+            {/* Sidebar (Left) */}
+            <aside className="w-20 xl:w-72 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl flex flex-col items-center xl:items-stretch py-6 z-30 shadow-2xl overflow-hidden h-[calc(100vh-8rem)]">
+                <div className="flex-1 px-3 xl:px-6 overflow-y-auto scrollbar-hide space-y-6">
 
-                    <ToolButton
-                        active={activeTool === "crop"}
-                        onClick={() => setActiveTool("crop")}
-                        icon={<CropIcon />}
-                        label="Crop & Resize"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "hand"}
-                        onClick={() => setActiveTool("hand")}
-                        icon={<Hand />}
-                        label="Pan Tool"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "id-card"}
-                        onClick={() => {
-                            setActiveTool("id-card");
-                            if (currentImage && !frontImage) {
-                                setFrontImage(currentImage);
-                            }
-                        }}
-                        icon={<CreditCard />}
-                        label="ID Card A4 Layout"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "convert"}
-                        onClick={() => setActiveTool("convert")}
-                        icon={<FileType />}
-                        label="Format Convert"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "ocr"}
-                        onClick={handleOcr}
-                        icon={<ScanText />}
-                        label="Extract Text"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "compress"}
-                        onClick={() => setActiveTool("compress")}
-                        icon={<Minimize2 />}
-                        label="Compress"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "filters"}
-                        onClick={() => setActiveTool("filters")}
-                        icon={<Palette />}
-                        label="Filters"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "adjust"}
-                        onClick={() => setActiveTool("adjust")}
-                        icon={<SlidersHorizontal />}
-                        label="Adjust"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "transform"}
-                        onClick={() => setActiveTool("transform")}
-                        icon={<RotateCw />}
-                        label="Transform"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "blur"}
-                        onClick={() => setActiveTool("blur")}
-                        icon={<Focus />}
-                        label="Blur/Sharpen"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "redeye"}
-                        onClick={() => setActiveTool("redeye")}
-                        icon={<Eye />}
-                        label="Red-eye Fix"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "draw"}
-                        onClick={() => setActiveTool("draw")}
-                        icon={<Pencil />}
-                        label="Draw"
-                        disabled={!imageState}
-                    />
-                    <ToolButton
-                        active={activeTool === "bg-remove"}
-                        onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }}
-                        icon={<Layers />}
-                        label="Remove BG"
-                        disabled={!imageState}
-                    />
+                    {/* Group: Essentials */}
+                    <div className="space-y-2">
+                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Essentials</h3>
+                        <ToolButton active={activeTool === "crop"} onClick={() => setActiveTool("crop")} icon={<CropIcon />} label="Crop & Resize" disabled={!imageState} />
+                        <ToolButton active={activeTool === "hand"} onClick={() => setActiveTool("hand")} icon={<Hand />} label="Pan Tool" disabled={!imageState} />
+                        <ToolButton active={activeTool === "id-card"} onClick={() => { setActiveTool("id-card"); if (currentImage && !frontImage) setFrontImage(currentImage); }} icon={<CreditCard />} label="ID Card" disabled={!imageState} />
+                    </div>
+
+                    {/* Group: Adjustments */}
+                    <div className="space-y-2">
+                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Adjustments</h3>
+                        <ToolButton active={activeTool === "filters"} onClick={() => setActiveTool("filters")} icon={<Palette />} label="Filters" disabled={!imageState} />
+                        <ToolButton active={activeTool === "adjust"} onClick={() => setActiveTool("adjust")} icon={<SlidersHorizontal />} label="Tune Image" disabled={!imageState} />
+                        <ToolButton active={activeTool === "blur"} onClick={() => setActiveTool("blur")} icon={<Focus />} label="Blur & Sharpen" disabled={!imageState} />
+                        <ToolButton active={activeTool === "transform"} onClick={() => setActiveTool("transform")} icon={<RotateCw />} label="Transform" disabled={!imageState} />
+                    </div>
+
+                    {/* Group: Social */}
+                    <div className="space-y-2">
+                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Social</h3>
+                        <ToolButton active={activeTool === "social-filters"} onClick={() => setActiveTool("social-filters")} icon={<Filter />} label="Insta Filters" disabled={!imageState} />
+                    </div>
+
+                    {/* Group: Smart Actions */}
+                    <div className="space-y-2">
+                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Smart Tools</h3>
+                        <ToolButton active={activeTool === "bg-remove"} onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }} icon={<Layers />} label="Remove BG" disabled={!imageState} />
+                        <ToolButton active={activeTool === "ocr"} onClick={handleOcr} icon={<ScanText />} label="Extract Text" disabled={!imageState} />
+                        <ToolButton active={activeTool === "redeye"} onClick={() => setActiveTool("redeye")} icon={<Eye />} label="Red-eye Fix" disabled={!imageState} />
+                    </div>
+
+                    {/* Group: Utilities */}
+                    <div className="space-y-2">
+                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Export</h3>
+                        <ToolButton active={activeTool === "convert"} onClick={() => setActiveTool("convert")} icon={<FileType />} label="Format Convert" disabled={!imageState} />
+                        <ToolButton active={activeTool === "compress"} onClick={() => setActiveTool("compress")} icon={<Minimize2 />} label="Compress" disabled={!imageState} />
+                    </div>
+
+                    {/* Creative */}
+                    <div className="space-y-2">
+                        <ToolButton active={activeTool === "draw"} onClick={() => setActiveTool("draw")} icon={<Pencil />} label="Draw" disabled={!imageState} />
+                    </div>
                 </div>
-            </div>
+            </aside>
 
             {/* Main Canvas Area */}
-            <div className="flex-1 relative bg-[#0a0a0a] overflow-hidden flex items-center justify-center p-8">
+            <main className="flex-1 relative bg-[var(--color-bg-page)] overflow-hidden flex items-center justify-center p-8">
 
                 {/* Top Toolbar (Undo/Redo/Zoom) */}
                 {imageState && (
@@ -1007,7 +1133,20 @@ export function Editor() {
                     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
                         <div className="flex flex-col items-center">
                             <Wand2 className="h-8 w-8 text-white animate-spin mb-2" />
-                            <p className="text-white font-medium">Processing...</p>
+                            <p className="text-white font-medium mb-3">Processing...</p>
+                            {(activeTool === 'bg-remove' || activeTool === 'ocr') && (
+                                <button
+                                    onClick={() => {
+                                        if (activeTool === 'bg-remove') cancelBgRemoval();
+                                        if (activeTool === 'ocr') cancelOcr();
+                                        setIsProcessing(false);
+                                        setActiveTool(null);
+                                    }}
+                                    className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            )}
                         </div>
                     </div>
                 )}
@@ -1017,36 +1156,38 @@ export function Editor() {
                     <button
                         onClick={handleSave}
                         disabled={isSaving}
-                        className="flex items-center gap-2 px-4 py-2 rounded-full bg-teal-500 text-white hover:bg-teal-600 font-medium transition-colors shadow-lg disabled:opacity-50"
+                        className="w-10 h-10 flex items-center justify-center rounded-full bg-teal-500 text-white hover:bg-teal-600 transition-colors shadow-lg disabled:opacity-50"
                         title="Save Project"
                     >
-                        {isSaving ? <Wand2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                        <span className="hidden sm:inline">{isSaving ? 'Saving...' : 'Save Project'}</span>
+                        {isSaving ? <Wand2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
                     </button>
                     <button
                         onClick={handleDownload}
-                        className="flex items-center gap-2 px-4 py-2 rounded-full bg-white text-black hover:bg-slate-200 font-medium transition-colors shadow-lg"
+                        className="w-10 h-10 flex items-center justify-center rounded-full bg-white text-black hover:bg-slate-200 transition-colors shadow-lg"
                         title="Download"
                     >
-                        <Download className="h-4 w-4" />
-                        <span className="hidden sm:inline">Download</span>
+                        <Download className="h-5 w-5" />
                     </button>
                     <button
-                        onClick={() => pushState(null)}
-                        className="p-2 rounded-full bg-black/50 text-white hover:bg-black/70 backdrop-blur-md transition-colors"
+                        onClick={() => {
+                            pushState(null);
+                            // Clear URL parameter when closing
+                            router.push('/editor');
+                        }}
+                        className="w-10 h-10 flex items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 backdrop-blur-md transition-colors shadow-lg"
                         title="Close / Reset"
                     >
                         <X className="h-5 w-5" />
                     </button>
                 </div>
-            </div>
+            </main>
 
 
 
             {/* Properties Panel (Right side) */}
             {
-                (activeTool === "crop" || activeTool === "ocr" || activeTool === "compress" || activeTool === "id-card" || activeTool === "convert" || activeTool === "filters" || activeTool === "adjust" || activeTool === "transform" || activeTool === "blur" || activeTool === "redeye" || activeTool === "draw") && (
-                    <div className="w-80 border-l border-white/10 bg-black/20 p-4 glass-panel z-20 flex flex-col transition-all overflow-y-auto">
+                (activeTool === "crop" || activeTool === "ocr" || activeTool === "compress" || activeTool === "id-card" || activeTool === "convert" || activeTool === "filters" || activeTool === "social-filters" || activeTool === "adjust" || activeTool === "transform" || activeTool === "blur" || activeTool === "redeye" || activeTool === "draw") && (
+                    <aside className="w-80 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl p-6 z-20 flex flex-col transition-all overflow-y-auto shadow-2xl animate-slide-in-right h-[calc(100vh-8rem)]">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-white font-bold">
                                 {activeTool === "crop" ? "Crop Settings" :
@@ -1059,7 +1200,8 @@ export function Editor() {
                                                             activeTool === "blur" ? "Blur / Sharpen" :
                                                                 activeTool === "redeye" ? "Red-eye Fix" :
                                                                     activeTool === "draw" ? "Draw" :
-                                                                        "ID Card A4 Layout"}
+                                                                        activeTool === "social-filters" ? "Instagram Filters" :
+                                                                            "ID Card A4 Layout"}
                             </h3>
                             <button
                                 onClick={() => setActiveTool(null)}
@@ -1079,7 +1221,7 @@ export function Editor() {
                                     {frontImage ? (
                                         <>
                                             <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
-                                                <img src={frontImage} alt="Front" className="w-full h-full object-cover" style={{ transform: `scale(${frontScale / 100})` }} />
+                                                <img src={frontImage || ""} alt="Front" className="w-full h-full object-cover" style={{ transform: `scale(${frontScale / 100})` }} />
                                                 <button onClick={() => setFrontImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <X className="h-3 w-3" />
                                                 </button>
@@ -1117,7 +1259,7 @@ export function Editor() {
                                     ) : (
                                         <>
                                             <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
-                                                <img src={backImage} alt="Back" className="w-full h-full object-cover" style={{ transform: `scale(${backScale / 100})` }} />
+                                                <img src={backImage || ""} alt="Back" className="w-full h-full object-cover" style={{ transform: `scale(${backScale / 100})` }} />
                                                 <button onClick={() => setBackImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <X className="h-3 w-3" />
                                                 </button>
@@ -1178,12 +1320,13 @@ export function Editor() {
                                     <label className="text-xs text-slate-400 block mb-2">Output Format</label>
                                     <select
                                         value={selectedFormat}
-                                        onChange={(e) => setSelectedFormat(e.target.value as "png" | "jpeg" | "webp")}
+                                        onChange={(e) => setSelectedFormat(e.target.value as "png" | "jpeg" | "webp" | "pdf")}
                                         className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/50"
                                     >
                                         <option value="png">PNG</option>
                                         <option value="jpeg">JPG</option>
                                         <option value="webp">WebP</option>
+                                        <option value="pdf">PDF (Download)</option>
                                     </select>
                                 </div>
                                 <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">Convert Image</button>
@@ -1246,8 +1389,8 @@ export function Editor() {
                         {activeTool === "filters" && (
                             <div className="space-y-4">
                                 <p className="text-xs text-slate-400">Apply preset image filters.</p>
-                                <div className="grid grid-cols-2 gap-2">
-                                    {(['grayscale', 'sepia', 'vintage', 'warm', 'cool', 'highContrast', 'noir', 'fade'] as const).map((filter) => (
+                                <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
+                                    {(['grayscale', 'sepia', 'vintage', 'warm', 'cool', 'highContrast', 'noir', 'fade', 'kodak', 'technicolor', 'polaroid', 'dramatic', 'golden', 'cyberpunk'] as const).map((filter) => (
                                         <button
                                             key={filter}
                                             onClick={() => setSelectedFilter(filter)}
@@ -1263,6 +1406,29 @@ export function Editor() {
                                     ))}
                                 </div>
                                 <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Filter</button>
+                            </div>
+                        )}
+
+                        {activeTool === "social-filters" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Trendy social media filters.</p>
+                                <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
+                                    {(['clarendon', 'gingham', 'juno', 'lark', 'ludwig', 'valencia', 'moon', 'reyes', 'slumber', 'crema', 'aden', 'perpetua'] as const).map((filter) => (
+                                        <button
+                                            key={filter}
+                                            onClick={() => setSelectedFilter(filter)}
+                                            className={clsx(
+                                                "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
+                                                selectedFilter === filter
+                                                    ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                    : "border-white/10 text-slate-400 hover:bg-white/5"
+                                            )}
+                                        >
+                                            {filter}
+                                        </button>
+                                    ))}
+                                </div>
+                                <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Insta Filter</button>
                             </div>
                         )}
 
@@ -1458,7 +1624,7 @@ export function Editor() {
                                 </div>
                             </div>
                         )}
-                    </div>
+                    </aside>
                 )
             }
         </div >
@@ -1471,14 +1637,16 @@ function ToolButton({ active, icon, label, onClick, disabled }: { active?: boole
             onClick={onClick}
             disabled={disabled}
             className={clsx(
-                "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group lg:justify-start justify-center",
-                active ? "bg-white/10 text-white ring-1 ring-white/20" : "text-slate-400 hover:bg-white/5 hover:text-white",
-                disabled && "opacity-50 cursor-not-allowed"
+                "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group lg:justify-start justify-center relative overflow-hidden",
+                active
+                    ? "bg-gradient-to-r from-teal-500/20 to-cyan-500/20 text-teal-400 ring-1 ring-teal-500/50 shadow-[0_0_15px_-3px_rgba(20,184,166,0.3)]"
+                    : "text-slate-400 hover:bg-white/5 hover:text-white",
+                disabled && "opacity-50 cursor-not-allowed grayscale"
             )}
         >
-            <div className={clsx("h-5 w-5", active && "text-white")}>{icon}</div>
-            <span className="hidden lg:block font-medium text-sm">{label}</span>
-            {active && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white hidden lg:block" />}
+            <div className={clsx("h-5 w-5 transition-colors", active ? "text-teal-400" : "text-slate-300 group-hover:text-white")}>{icon}</div>
+            <span className={clsx("hidden xl:block font-medium text-sm transition-colors", active ? "text-white" : "text-slate-300 group-hover:text-white")}>{label}</span>
+            {active && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-teal-400 hidden xl:block shadow-[0_0_8px_rgba(20,184,166,0.8)]" />}
         </button>
     );
 }

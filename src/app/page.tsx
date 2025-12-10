@@ -29,46 +29,17 @@ export default function Home() {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               href="/editor"
-              className="group flex items-center gap-2 rounded-full bg-white px-8 py-4 text-base font-bold text-black transition-all hover:bg-slate-200 hover:scale-105"
+              className="btn-primary flex items-center gap-2 px-8 py-4 text-lg group"
             >
               Start Editing Now
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+              <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
             </Link>
             <Link
               href="/dashboard"
-              className="rounded-full px-8 py-4 text-base font-medium text-white ring-1 ring-white/20 transition-all hover:bg-white/10"
+              className="btn-secondary px-8 py-4 text-lg"
             >
               View History
             </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Grid */}
-      <section className="py-24 bg-black/20">
-        <div className="container mx-auto">
-          <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-            <FeatureCard
-              icon={<Layers className="h-6 w-6 text-teal-400" />}
-              title="Background Removal"
-              description="Instantly remove backgrounds from any image using advanced AI. Replace with colors or transparency."
-            />
-            <FeatureCard
-              icon={<ImagePlus className="h-6 w-6 text-cyan-400" />}
-              title="ID Card Combiner"
-              description="Easily combine front and back scans of ID cards into a single printable A4 or 4x6 page."
-            />
-            <FeatureCard
-              icon={<ScanText className="h-6 w-6 text-blue-400" />}
-              title="Text Extraction (OCR)"
-              description="Extract text from images in seconds. Perfect for digitizing documents and notes."
-            />
-            <FeatureCard
-              icon={<Crop className="h-6 w-6 text-sky-400" />}
-              title="Crop & Resize"
-              description="Precision cropping and resizing tools to fit any social media or print requirement."
-            />
-            {/* Add more cards as needed */}
           </div>
         </div>
       </section>

@@ -15,17 +15,14 @@ export async function POST(request: NextRequest) {
 
         console.log("Processing image:", imageFile.name, imageFile.size, "bytes");
 
-        // Convert File to ArrayBuffer then to Blob (the library can accept Blob)
+        // Convert File to Blob
         const arrayBuffer = await imageFile.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-
-        // Create a Blob from the array buffer
-        const inputBlob = new Blob([uint8Array], { type: imageFile.type || 'image/png' });
+        const inputBlob = new Blob([arrayBuffer], { type: imageFile.type || 'image/png' });
 
         // Process with background removal
         const resultBlob = await removeBackground(inputBlob);
 
-        console.log("Background removal complete, result size:", resultBlob.size);
+        console.log("Background removal complete");
 
         // Convert Blob to Buffer for response
         const resultBuffer = Buffer.from(await resultBlob.arrayBuffer());

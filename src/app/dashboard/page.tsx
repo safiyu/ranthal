@@ -5,6 +5,7 @@ import { eq, desc } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { HistoryImage, DeleteButton } from "./HistoryImage";
 
 export default async function DashboardPage() {
     const session = await auth();
@@ -48,14 +49,7 @@ export default async function DashboardPage() {
                     {userEdits.map((edit) => (
                         <div key={edit.id} className="group relative glass-panel rounded-xl overflow-hidden hover:ring-1 hover:ring-teal-500/50 transition-all">
                             <div className="aspect-[4/3] bg-black/50 relative">
-                                {/* Placeholder for image preview - in real app would be edit.resultUrl */}
-                                {/* For MVP we might not have real URLs if we don't handle upload completely yet, but let's assume valid URL */}
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                    src={edit.resultUrl || "/placeholder.png"}
-                                    alt="Edit preview"
-                                    className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-                                />
+                                <HistoryImage src={edit.resultUrl} alt="Edit preview" />
                             </div>
                             <div className="p-4">
                                 <div className="flex items-center justify-between mb-2">
@@ -80,6 +74,7 @@ export default async function DashboardPage() {
                                     >
                                         Download
                                     </a>
+                                    <DeleteButton editId={edit.id} />
                                 </div>
                             </div>
                         </div>

@@ -3,36 +3,59 @@
 @tailwind utilities;
 
 :root {
-  /* ... existing vars ... */
-  /* HSL Colors */
-  --hue-primary: 0;
-  /* Monochrome */
-  --hue-bg: 0;
-  /* Black */
+  /* HSL Colors - Premium Dark Theme */
+  --hue-primary: 171;
+  /* Teal */
+  --hue-secondary: 189;
+  /* Cyan */
 
-  --color-bg-page: #000000;
-  --color-bg-card: #0a0a0a;
-  --color-bg-card-hover: #171717;
+  /* Backgrounds */
+  --color-bg-page: #030712;
+  /* Rich dark slate/black */
+  --color-bg-card: #0f172a;
+  /* Slate 900 */
+  --color-bg-surface: #1e293b;
+  /* Slate 800 */
 
+  /* Accents */
   --color-primary: #14b8a6;
-  --color-primary-hover: #e5e5e5;
+  /* Teal 500 */
+  --color-primary-glow: rgba(20, 184, 166, 0.5);
+  --color-secondary: #06b6d4;
+  /* Cyan 500 */
 
-  --color-text-main: #ffffff;
-  --color-text-muted: #a1a1aa;
-  --color-border: #27272a;
+  /* Text */
+  --color-text-main: #f8fafc;
+  /* Slate 50 */
+  --color-text-muted: #94a3b8;
+  /* Slate 400 */
+  --color-text-dim: #64748b;
+  /* Slate 500 */
+
+  /* Borders */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-hover: rgba(255, 255, 255, 0.15);
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #2dd4bf, #0d9488);
+  --gradient-primary: linear-gradient(135deg, #0d9488, #0891b2);
+  --gradient-glow: radial-gradient(circle at center, rgba(20, 184, 166, 0.15) 0%, transparent 70%);
 
-  /* Utils */
+  /* Radii */
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-lg: 20px;
+  --radius-lg: 24px;
+  --radius-full: 9999px;
 
-  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  --shadow-glow: 0 0 20px -5px var(--color-primary);
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-glow: 0 0 20px -5px var(--color-primary-glow);
 
-  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Transitions */
+  --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-bounce: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 * {
@@ -51,9 +74,12 @@ body {
 body {
   color: var(--color-text-main);
   background: var(--color-bg-page);
-  /* Fallbacks will be handled by Layout Loading */
   font-family: var(--font-inter), sans-serif;
   -webkit-font-smoothing: antialiased;
+  background-image:
+    radial-gradient(at 0% 0%, rgba(20, 184, 166, 0.03) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(6, 182, 212, 0.03) 0px, transparent 50%);
+  background-attachment: fixed;
 }
 
 /* Typography */
@@ -65,17 +91,16 @@ h5,
 h6 {
   font-family: var(--font-outfit), sans-serif;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 h1 {
   font-size: 3.5rem;
-  letter-spacing: -0.02em;
 }
 
 h2 {
   font-size: 2.5rem;
-  letter-spacing: -0.01em;
 }
 
 h3 {
@@ -89,58 +114,146 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 /* Utilities */
 .glass-panel {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-md);
+}
+
+.glass-panel:hover {
+  border-color: var(--color-border-hover);
 }
 
 .btn-primary {
-  background: var(--gradient-primary);
+  background: linear-gradient(135deg, #14b8a6 0%, #0891b2 100%);
   color: white;
-  padding: 0.75rem 1.5rem;
-  border-radius: var(--radius-md);
-  border: none;
+  padding: 0.75rem 1.75rem;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   font-weight: 600;
-  font-size: 1rem;
-  transition: var(--transition);
-  box-shadow: var(--shadow-sm);
-  /* Changed from --shadow-glow */
+  font-size: 0.95rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06),
+    0 0 20px -5px rgba(20, 184, 166, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  position: relative;
+  overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent 50%);
+  opacity: 1;
+  transition: opacity 0.2s;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: 0.5s;
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 15px -5px var(--color-primary);
-  /* Reduced glow */
-  filter: brightness(1.1);
+  box-shadow:
+    0 10px 15px -3px rgba(13, 148, 136, 0.3),
+    0 0 30px -5px rgba(20, 184, 166, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.btn-primary:hover::before {
+  left: 100%;
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
-  padding: 0.75rem 1.5rem;
-  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
+  color: var(--color-text-main);
+  padding: 0.75rem 1.75rem;
+  border-radius: var(--radius-full);
   border: 1px solid rgba(255, 255, 255, 0.1);
   font-weight: 500;
-  transition: var(--transition);
+  font-size: 0.95rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+  color: white;
+}
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  transition: var(--transition-fast);
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-main);
+}
+
+.icon-btn.active {
+  background: rgba(20, 184, 166, 0.15);
+  color: var(--color-primary);
 }
 
 /* Layout */
 .container {
   width: 100%;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 0 1.5rem;
-}
-
-.hidden {
-  display: none;
 }
 
 .flex-center {
@@ -149,7 +262,66 @@ button {
   justify-content: center;
 }
 
-.flex-col {
-  display: flex;
-  flex-direction: column;
+/* Animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out forwards;
+}
+
+.delay-100 {
+  animation-delay: 100ms;
+}
+
+.delay-200 {
+  animation-delay: 200ms;
+}
+
+.delay-300 {
+  animation-delay: 300ms;
+}
+
+/* Keep existing toast/modal animations but update them later if needed */
+/* Toast Animation */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out forwards;
+}
+
+/* Modal Animation */
+@keyframes scale-in {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s ease-out forwards;
 }

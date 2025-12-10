@@ -1,16 +1,31 @@
-import Tesseract from "tesseract.js";
+// Abort controllers for cancelable operations
+let bgRemovalController: AbortController | null = null;
+let ocrController: AbortController | null = null;
+
+export function cancelBgRemoval() {
+    if (bgRemovalController) {
+        bgRemovalController.abort();
+        bgRemovalController = null;
+    }
+}
+
+export function cancelOcr() {
+    if (ocrController) {
+        ocrController.abort();
+        ocrController = null;
+    }
+}
 
 export async function removeBg(imageSrc: string): Promise<string> {
+    // Cancel any existing operation
+    cancelBgRemoval();
+    bgRemovalController = new AbortController();
+
     try {
         // Convert data URL or URL to Blob
         let blob: Blob;
-        if (imageSrc.startsWith('data:')) {
-            const response = await fetch(imageSrc);
-            blob = await response.blob();
-        } else {
-            const response = await fetch(imageSrc);
-            blob = await response.blob();
-        }
+        const fetchResponse = await fetch(imageSrc);
+        blob = await fetchResponse.blob();
 
         // Send to server API
         const formData = new FormData();
@@ -19,6 +34,7 @@ export async function removeBg(imageSrc: string): Promise<string> {
         const response = await fetch('/api/remove-bg', {
             method: 'POST',
             body: formData,
+            signal: bgRemovalController.signal,
         });
 
         if (!response.ok) {
@@ -26,20 +42,49 @@ export async function removeBg(imageSrc: string): Promise<string> {
         }
 
         const resultBlob = await response.blob();
+        bgRemovalController = null;
         return URL.createObjectURL(resultBlob);
     } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+            throw new Error('Operation cancelled');
+        }
         console.error("BG Removal failed:", error);
         throw new Error("Failed to remove background");
     }
 }
 
 export async function extractText(imageSrc: string): Promise<string> {
+    // Cancel any existing operation
+    cancelOcr();
+    ocrController = new AbortController();
+
     try {
-        const result = await Tesseract.recognize(imageSrc, 'eng', {
-            logger: m => console.log(m)
+        // Convert data URL or URL to Blob
+        let blob: Blob;
+        const fetchResponse = await fetch(imageSrc);
+        blob = await fetchResponse.blob();
+
+        // Send to server API
+        const formData = new FormData();
+        formData.append('image', blob, 'image.png');
+
+        const response = await fetch('/api/ocr', {
+            method: 'POST',
+            body: formData,
+            signal: ocrController.signal,
         });
-        return result.data.text;
+
+        if (!response.ok) {
+            throw new Error('OCR processing failed');
+        }
+
+        const result = await response.json();
+        ocrController = null;
+        return result.text;
     } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+            throw new Error('Operation cancelled');
+        }
         console.error("OCR failed:", error);
         throw new Error("Failed to extract text");
     }
@@ -75,4 +120,3 @@ export async function compressImage(imageSrc: string, quality: number = 0.7): Pr
         img.src = imageSrc;
     });
 }
-
