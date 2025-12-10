@@ -786,13 +786,7 @@ export function Editor() {
             {/* Sidebar (Left) */}
             <div className="w-20 lg:w-64 border-r border-white/10 bg-black/20 flex flex-col items-center lg:items-stretch py-4 z-10 glass-panel">
                 <div className="flex-1 space-y-2 px-2 lg:px-4">
-                    <ToolButton
-                        active={activeTool === "bg-remove"}
-                        onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }}
-                        icon={<Layers />}
-                        label="Remove BG"
-                        disabled={!imageState}
-                    />
+
                     <ToolButton
                         active={activeTool === "crop"}
                         onClick={() => setActiveTool("crop")}
@@ -880,6 +874,13 @@ export function Editor() {
                         onClick={() => setActiveTool("draw")}
                         icon={<Pencil />}
                         label="Draw"
+                        disabled={!imageState}
+                    />
+                    <ToolButton
+                        active={activeTool === "bg-remove"}
+                        onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }}
+                        icon={<Layers />}
+                        label="Remove BG"
                         disabled={!imageState}
                     />
                 </div>

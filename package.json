@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
-    "@imgly/background-removal": "^1.7.0",
+    "@imgly/background-removal-node": "^1.4.5",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.5.0",
     "clsx": "^2.1.1",

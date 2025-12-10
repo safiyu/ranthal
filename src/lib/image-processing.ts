@@ -1,10 +1,32 @@
-import { removeBackground } from "@imgly/background-removal";
 import Tesseract from "tesseract.js";
 
 export async function removeBg(imageSrc: string): Promise<string> {
     try {
-        const blob = await removeBackground(imageSrc);
-        return URL.createObjectURL(blob);
+        // Convert data URL or URL to Blob
+        let blob: Blob;
+        if (imageSrc.startsWith('data:')) {
+            const response = await fetch(imageSrc);
+            blob = await response.blob();
+        } else {
+            const response = await fetch(imageSrc);
+            blob = await response.blob();
+        }
+
+        // Send to server API
+        const formData = new FormData();
+        formData.append('image', blob, 'image.png');
+
+        const response = await fetch('/api/remove-bg', {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            throw new Error('Server processing failed');
+        }
+
+        const resultBlob = await response.blob();
+        return URL.createObjectURL(resultBlob);
     } catch (error) {
         console.error("BG Removal failed:", error);
         throw new Error("Failed to remove background");
@@ -53,3 +75,4 @@ export async function compressImage(imageSrc: string, quality: number = 0.7): Pr
         img.src = imageSrc;
     });
 }
+

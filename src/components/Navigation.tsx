@@ -1,40 +1,53 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { Aperture, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { useSession, signOut } from "next-auth/react";
 
 export function Navigation() {
     const pathname = usePathname();
     const { data: session, status } = useSession();
 
+    // Get first name only
+    const getFirstName = (name: string | null | undefined) => {
+        if (!name) return '';
+        return name.split(' ')[0];
+    };
+
     return (
         <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-black/50 backdrop-blur-xl transition-all">
-            <div className="container mx-auto flex h-16 items-center justify-between">
-                {/* Logo */}
+            <div className="mx-auto flex h-16 items-center justify-between px-4 lg:px-8">
+                {/* Logo - Left side */}
                 <Link href="/" className="flex items-center gap-2 group">
-                    <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 shadow-lg shadow-white/5 transition-transform group-hover:scale-105">
-                        <Aperture className="h-5 w-5 text-white" />
+                    <div className="relative h-20 w-20 transition-transform group-hover:scale-105">
+                        <Image
+                            src="/logos/22.png"
+                            alt="Logo"
+                            fill
+                            className="object-contain"
+                            priority
+                        />
                     </div>
                     <span className="text-xl font-bold tracking-tight text-white/90">Ranthal</span>
                 </Link>
 
-                {/* Links */}
+                {/* Links - Center */}
                 <div className="hidden md:flex items-center gap-8">
                     <NavLink href="/editor" current={pathname}>Editor</NavLink>
                     <NavLink href="/dashboard" current={pathname}>History</NavLink>
                 </div>
 
-                {/* Auth Buttons - Show based on session state */}
+                {/* Auth Buttons - Right side */}
                 <div className="flex items-center gap-4">
                     {status === "loading" ? (
                         <div className="w-20 h-8 bg-white/10 rounded-full animate-pulse" />
                     ) : session?.user ? (
                         <>
                             <span className="text-sm text-white/70 hidden sm:block">
-                                {session.user.name || session.user.email}
+                                {getFirstName(session.user.name) || session.user.email}
                             </span>
                             <button
                                 onClick={() => signOut({ callbackUrl: '/' })}
