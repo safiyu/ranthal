@@ -147,6 +147,7 @@ export function Editor() {
     const imageRef = useRef<HTMLImageElement>(null);
     const activeStrokePoints = useRef<{ x: number, y: number }[]>([]);
 
+
     // CSS Filter string for real-time preview
     const getPreviewFilter = () => {
         if (activeTool === "filters") {
@@ -511,8 +512,8 @@ export function Editor() {
                 });
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchParams]);
+    }, [searchParams, imageState, pushState]);
+
 
     const handleSave = async () => {
         if (!currentImage) return;
@@ -1632,6 +1633,7 @@ export function Editor() {
 }
 
 function ToolButton({ active, icon, label, onClick, disabled }: { active?: boolean; icon: React.ReactNode; label: string; onClick?: () => void; disabled?: boolean }) {
+
     return (
         <button
             onClick={onClick}

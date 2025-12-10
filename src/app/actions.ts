@@ -10,11 +10,13 @@ import { eq, and, lt } from "drizzle-orm";
 
 export async function saveEdit(formData: FormData) {
     const session = await auth();
+
     if (!session?.user?.id) {
         throw new Error("Unauthorized");
     }
 
     const resultImage = formData.get("resultImage") as File;
+
     const toolUsed = formData.get("toolUsed") as string;
     const originalUrl = formData.get("originalUrl") as string || "";
 

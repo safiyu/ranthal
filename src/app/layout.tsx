@@ -22,7 +22,7 @@ export default function RootLayout({
       <body className={`${inter.variable} ${outfit.variable}`} suppressHydrationWarning>
         <Providers>
           <Navigation />
-          <main className="min-h-screen pt-16">{children}</main>
+          <main className="min-h-screen pt-32">{children}</main>
         </Providers>
       </body>
     </html>

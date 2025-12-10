@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@auth/drizzle-adapter": "^1.11.1",
     "@imgly/background-removal-node": "^1.4.5",
     "@types/exif-js": "^2.3.1",
     "bcryptjs": "^3.0.3",

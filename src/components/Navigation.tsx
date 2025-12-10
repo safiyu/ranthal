@@ -84,6 +84,16 @@ export function Navigation() {
                                         </p>
                                     </div>
                                     <div className="p-1">
+                                        {session.user.role === "admin" && (
+                                            <Link
+                                                href="/admin/users"
+                                                onClick={() => setIsProfileOpen(false)}
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-white/10 rounded-lg transition-colors mb-1"
+                                            >
+                                                <User className="h-4 w-4" />
+                                                Admin Panel
+                                            </Link>
+                                        )}
                                         <button
                                             onClick={() => signOut({ callbackUrl: '/' })}
                                             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
