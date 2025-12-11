@@ -90,7 +90,7 @@ export async function applyAdjustments(
 /**
  * Rotate image by 90, 180, or 270 degrees
  */
-export async function rotateImage(imageSrc: string, angle: 90 | 180 | 270): Promise<string> {
+export async function rotateImage(imageSrc: string, angle: number): Promise<string> {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.crossOrigin = 'anonymous';
@@ -102,17 +102,19 @@ export async function rotateImage(imageSrc: string, angle: 90 | 180 | 270): Prom
                 return;
             }
 
-            // Swap dimensions for 90 and 270 degree rotations
-            if (angle === 90 || angle === 270) {
-                canvas.width = img.height;
-                canvas.height = img.width;
-            } else {
-                canvas.width = img.width;
-                canvas.height = img.height;
-            }
+            const rads = (angle * Math.PI) / 180;
+            const c = Math.cos(rads);
+            const s = Math.sin(rads);
 
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            ctx.rotate((angle * Math.PI) / 180);
+            // Calculate new bounding box
+            const newWidth = Math.abs(img.width * c) + Math.abs(img.height * s);
+            const newHeight = Math.abs(img.width * s) + Math.abs(img.height * c);
+
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+
+            ctx.translate(newWidth / 2, newHeight / 2);
+            ctx.rotate(rads);
             ctx.drawImage(img, -img.width / 2, -img.height / 2);
             resolve(canvas.toDataURL('image/png'));
         };

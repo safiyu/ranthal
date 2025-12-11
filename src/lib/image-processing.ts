@@ -1,6 +1,9 @@
+import { createWorker } from "tesseract.js";
+
 // Abort controllers for cancelable operations
 let bgRemovalController: AbortController | null = null;
-let ocrController: AbortController | null = null;
+// OCR in client doesn't use AbortController in the same way, but we can track the worker to terminate it.
+let currentOcrWorker: Awaited<ReturnType<typeof createWorker>> | null = null;
 
 export function cancelBgRemoval() {
     if (bgRemovalController) {
@@ -9,10 +12,14 @@ export function cancelBgRemoval() {
     }
 }
 
-export function cancelOcr() {
-    if (ocrController) {
-        ocrController.abort();
-        ocrController = null;
+export async function cancelOcr() {
+    if (currentOcrWorker) {
+        try {
+            await currentOcrWorker.terminate();
+        } catch (e) {
+            console.error("Failed to terminate worker", e);
+        }
+        currentOcrWorker = null;
     }
 }
 
@@ -55,36 +62,21 @@ export async function removeBg(imageSrc: string): Promise<string> {
 
 export async function extractText(imageSrc: string): Promise<string> {
     // Cancel any existing operation
-    cancelOcr();
-    ocrController = new AbortController();
+    await cancelOcr();
 
     try {
-        // Convert data URL or URL to Blob
-        let blob: Blob;
-        const fetchResponse = await fetch(imageSrc);
-        blob = await fetchResponse.blob();
+        // Initialize worker
+        currentOcrWorker = await createWorker('eng');
 
-        // Send to server API
-        const formData = new FormData();
-        formData.append('image', blob, 'image.png');
+        // Run recognition
+        const ret = await currentOcrWorker.recognize(imageSrc);
 
-        const response = await fetch('/api/ocr', {
-            method: 'POST',
-            body: formData,
-            signal: ocrController.signal,
-        });
+        // Cleanup
+        await currentOcrWorker.terminate();
+        currentOcrWorker = null;
 
-        if (!response.ok) {
-            throw new Error('OCR processing failed');
-        }
-
-        const result = await response.json();
-        ocrController = null;
-        return result.text;
+        return ret.data.text;
     } catch (error) {
-        if ((error as Error).name === 'AbortError') {
-            throw new Error('Operation cancelled');
-        }
         console.error("OCR failed:", error);
         throw new Error("Failed to extract text");
     }

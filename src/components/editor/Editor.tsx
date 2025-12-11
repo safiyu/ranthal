@@ -2,53 +2,57 @@
 
 import { useRef, useState, useEffect, useCallback, useTransition } from "react";
 import { useDropzone } from "react-dropzone";
-import Cropper, { Area } from "react-easy-crop";
+import { Slider } from "@/components/ui/Slider";
+import ReactCrop, { type Crop, type PixelCrop } from "react-image-crop";
+import "react-image-crop/dist/ReactCrop.css";
 import {
     Crop as CropIcon,
-    Download,
-    Eye,
-    EyeOff,
-    FileType,
-    ImageIcon,
-    Layers,
-    Minimize2,
-    Minus,
-    Plus,
-    Redo,
-    RefreshCw,
-    ScanText,
-    Settings,
-    Type,
-    Undo,
-    Upload,
     Wand2,
-    X,
-    ZoomIn,
-    ZoomOut,
-    CreditCard,
-    Hand,
-    Filter,
-    Sun,
-    Image as ImageIconLucide,
-    Save,
-    Palette,
-    SlidersHorizontal,
-    RotateCw,
+    Sliders,
+    Type,
     RotateCcw,
+    RotateCw,
     FlipHorizontal,
     FlipVertical,
+    Image as ImageIcon,
+    Download,
+    X,
+    Undo,
+    Redo,
+    ZoomIn,
+    ZoomOut,
+    ArrowUpDown,
+    LayoutGrid,
+    Plus,
+    CreditCard,
+    Minimize2,
+    Droplets,
+    Zap,
+    FileText,
+    Check,
+    ArrowRight,
+    Shuffle,
+    Hand,
+    Palette,
+    SlidersHorizontal,
+    Layers,
+    ScanText,
+    Eye,
+    FileType,
     Pencil,
+    Save,
     Highlighter,
     Eraser,
-    ArrowUpDown,
+    Filter,
     Focus,
-    FileText
+    Sun
 } from "lucide-react";
 import { saveEdit } from "@/app/actions";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import { removeBg, extractText, compressImage, cancelBgRemoval, cancelOcr } from "@/lib/image-processing";
 import { createIDCard } from "@/lib/id-card-utils";
+import { createCollage, AVAILABLE_LAYOUTS, type LayoutType, type CollageTransform } from "@/lib/collage-utils";
 import getCroppedImg from "@/lib/crop-utils";
 import { useHistory } from "@/hooks/useHistory";
 import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, type FilterName } from "@/lib/image-effects";
@@ -56,12 +60,14 @@ import { useToast } from "@/components/Toast";
 import { jsPDF } from "jspdf";
 import EXIF from "exif-js";
 
-type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "social-filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand";
+type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "social-filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand" | "collage";
 type DrawingMode = "pen" | "highlighter" | "eraser";
 
 type ImageState = {
     src: string;
     processedSrc: string | null;
+    collageImages?: string[]; // Store for collage builder
+    activeLayout?: string;
 };
 
 // Helper to convert data URL to Blob
@@ -97,7 +103,8 @@ export function Editor() {
     const [isProcessing, setIsProcessing] = useState(false);
 
     // Crop State
-    const [crop, setCrop] = useState({ x: 0, y: 0 });
+    const [crop, setCrop] = useState<Crop>();
+    const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
     const [zoom, setZoom] = useState(1);
     const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
 
@@ -131,6 +138,7 @@ export function Editor() {
     const [brightness, setBrightness] = useState(100);
     const [contrast, setContrast] = useState(100);
     const [saturation, setSaturation] = useState(100);
+    const [rotation, setRotation] = useState(0);
 
     // Blur/Sharpen State
     const [blurAmount, setBlurAmount] = useState(0);
@@ -145,7 +153,17 @@ export function Editor() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const tempCanvasRef = useRef<HTMLCanvasElement>(null);
     const imageRef = useRef<HTMLImageElement>(null);
+    const imgRef = useRef<HTMLImageElement>(null);
     const activeStrokePoints = useRef<{ x: number, y: number }[]>([]);
+
+    // Collage State
+    const [collageImages, setCollageImages] = useState<string[]>([]);
+    const [activeLayout, setActiveLayout] = useState<LayoutType | null>(null);
+    const [collageTransforms, setCollageTransforms] = useState<CollageTransform[]>([]);
+    const [selectedSlot, setSelectedSlot] = useState<number>(0);
+
+    // Preview State (for real-time collage/adjustments before commit)
+    const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
 
     // CSS Filter string for real-time preview
@@ -252,7 +270,45 @@ export function Editor() {
         maxFiles: 1
     });
 
-    const currentImage = imageState?.processedSrc || imageState?.src;
+    // Collage Image Drop
+    const onDropCollage = useCallback((acceptedFiles: File[]) => {
+        acceptedFiles.forEach(file => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                setCollageImages(prev => {
+                    if (prev.length >= 5) return prev; // Limit to 5
+                    // Add default transform for new image
+                    setCollageTransforms(t => [...t, { zoom: 1, panX: 0, panY: 0 }]);
+                    return [...prev, reader.result as string];
+                });
+            };
+            reader.readAsDataURL(file);
+        });
+    }, []);
+    const { getRootProps: getCollageProps, getInputProps: getCollageInputProps } = useDropzone({
+        onDrop: onDropCollage,
+        accept: { 'image/*': [] },
+        maxFiles: 5
+    });
+
+    const currentImage = previewSrc || imageState?.processedSrc || imageState?.src;
+
+    // Auto-generate collage preview
+    useEffect(() => {
+        if (activeTool === 'collage' && activeLayout && collageImages.length >= 2) {
+            const generatePreview = async () => {
+                try {
+                    const preview = await createCollage(collageImages, activeLayout, collageTransforms);
+                    setPreviewSrc(preview);
+                } catch (e) {
+                    console.error("Preview generation failed", e);
+                }
+            };
+            generatePreview();
+        } else {
+            setPreviewSrc(null);
+        }
+    }, [activeTool, activeLayout, collageImages, collageTransforms]);
 
     // Set front image when main image is uploaded
     const handleSetFrontImage = useCallback(() => {
@@ -698,12 +754,13 @@ export function Editor() {
     };
 
     // Rotate handler
-    const handleRotate = async (angle: 90 | 180 | 270) => {
+    const handleRotate = async (angle: number) => {
         if (!currentImage) return;
         setIsProcessing(true);
         try {
             const newSrc = await rotateImage(currentImage, angle);
             pushState({ ...imageState!, processedSrc: newSrc });
+            setRotation(0); // Reset slider after applying
         } catch (err) {
             showToast("Failed to rotate", "error");
         } finally {
@@ -995,8 +1052,21 @@ export function Editor() {
                     <div className="space-y-2">
                         <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Smart Tools</h3>
                         <ToolButton active={activeTool === "bg-remove"} onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }} icon={<Layers />} label="Remove BG" disabled={!imageState} />
+                        <ToolButton active={activeTool === "collage"} onClick={() => {
+                            setActiveTool("collage");
+                            if (currentImage && collageImages.length === 0) {
+                                setCollageImages([currentImage]);
+                                setCollageTransforms([{ zoom: 1, panX: 0, panY: 0 }]);
+                            }
+                        }} icon={<LayoutGrid />} label="Collage" disabled={!imageState} />
                         <ToolButton active={activeTool === "ocr"} onClick={handleOcr} icon={<ScanText />} label="Extract Text" disabled={!imageState} />
                         <ToolButton active={activeTool === "redeye"} onClick={() => setActiveTool("redeye")} icon={<Eye />} label="Red-eye Fix" disabled={!imageState} />
+                    </div>
+
+                    {/* Group: Creative */}
+                    <div className="space-y-2">
+                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Creative</h3>
+                        <ToolButton active={activeTool === "draw"} onClick={() => setActiveTool("draw")} icon={<Pencil />} label="Draw" disabled={!imageState} />
                     </div>
 
                     {/* Group: Utilities */}
@@ -1006,10 +1076,7 @@ export function Editor() {
                         <ToolButton active={activeTool === "compress"} onClick={() => setActiveTool("compress")} icon={<Minimize2 />} label="Compress" disabled={!imageState} />
                     </div>
 
-                    {/* Creative */}
-                    <div className="space-y-2">
-                        <ToolButton active={activeTool === "draw"} onClick={() => setActiveTool("draw")} icon={<Pencil />} label="Draw" disabled={!imageState} />
-                    </div>
+
                 </div>
             </aside>
 
@@ -1055,25 +1122,54 @@ export function Editor() {
                 ) : (
                     <div className="relative w-full h-full flex items-center justify-center">
                         {activeTool === "crop" ? (
-                            <div className="relative w-full h-full bg-black/50">
-                                <Cropper
-                                    image={currentImage || ""}
+                            <div className="max-h-full max-w-full overflow-auto flex items-center justify-center p-4">
+                                <ReactCrop
                                     crop={crop}
-                                    zoom={zoom}
+                                    onChange={(c) => setCrop(c)}
                                     aspect={undefined}
-                                    onCropChange={setCrop}
-                                    onZoomChange={setZoom}
-                                    onCropComplete={(_, pixels) => setCroppedAreaPixels(pixels)}
-                                />
+                                    onComplete={(c) => {
+                                        setCompletedCrop(c);
+                                        // Calculate scale between displayed image and actual image
+                                        if (imgRef.current) {
+                                            const image = imgRef.current;
+                                            const scaleX = image.naturalWidth / image.width;
+                                            const scaleY = image.naturalHeight / image.height;
+
+                                            setCroppedAreaPixels({
+                                                x: c.x * scaleX,
+                                                y: c.y * scaleY,
+                                                width: c.width * scaleX,
+                                                height: c.height * scaleY,
+                                            });
+                                        }
+                                    }}
+                                    className="max-w-full max-h-full"
+                                >
+                                    <img
+                                        ref={imgRef}
+                                        alt="Crop me"
+                                        src={currentImage || ""}
+                                        style={{
+                                            transform: `scale(${1}) rotate(${rotation}deg)`,
+                                            maxHeight: '70vh',
+                                            maxWidth: '100%',
+                                            objectFit: 'contain'
+                                        }}
+                                        // We need to capture the image ref for proper scaling calculations if needed
+                                        onLoad={(e) => {
+                                            // You might need to set aspect or initial crop here if desired
+                                        }}
+                                    />
+                                </ReactCrop>
                             </div>
                         ) : (
                             <div
                                 className={clsx(
-                                    "relative transition-transform duration-75 ease-linear will-change-transform",
+                                    "relative transition-transform duration-75 ease-linear will-change-transform w-full h-full flex items-center justify-center",
                                     activeTool === "hand" ? (isPanning ? "cursor-grabbing" : "cursor-grab") : ""
                                 )}
                                 style={{
-                                    transform: `scale(${viewZoom / 100}) translate(${pan.x}px, ${pan.y}px)`
+                                    transform: `translate(${pan.x}px, ${pan.y}px)`
                                 }}
                                 onMouseDown={(e) => {
                                     if (activeTool === "hand") {
@@ -1099,7 +1195,10 @@ export function Editor() {
                                     src={currentImage || ""}
                                     alt="Work in progress"
                                     className="max-w-full max-h-full object-contain shadow-2xl rounded-sm transition-all"
-                                    style={{ filter: getPreviewFilter() }}
+                                    style={{
+                                        filter: getPreviewFilter(),
+                                        transform: `scale(${viewZoom / 100}) ${activeTool === "transform" && rotation !== 0 ? `rotate(${rotation}deg)` : ""}`
+                                    }}
                                 />
                                 {activeTool === "draw" && (
                                     <>
@@ -1187,7 +1286,7 @@ export function Editor() {
 
             {/* Properties Panel (Right side) */}
             {
-                (activeTool === "crop" || activeTool === "ocr" || activeTool === "compress" || activeTool === "id-card" || activeTool === "convert" || activeTool === "filters" || activeTool === "social-filters" || activeTool === "adjust" || activeTool === "transform" || activeTool === "blur" || activeTool === "redeye" || activeTool === "draw") && (
+                (activeTool === "crop" || activeTool === "ocr" || activeTool === "compress" || activeTool === "id-card" || activeTool === "convert" || activeTool === "filters" || activeTool === "social-filters" || activeTool === "adjust" || activeTool === "transform" || activeTool === "blur" || activeTool === "redeye" || activeTool === "draw" || activeTool === "collage") && (
                     <aside className="w-80 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl p-6 z-20 flex flex-col transition-all overflow-y-auto shadow-2xl animate-slide-in-right h-[calc(100vh-8rem)]">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-white font-bold">
@@ -1202,7 +1301,8 @@ export function Editor() {
                                                                 activeTool === "redeye" ? "Red-eye Fix" :
                                                                     activeTool === "draw" ? "Draw" :
                                                                         activeTool === "social-filters" ? "Instagram Filters" :
-                                                                            "ID Card A4 Layout"}
+                                                                            activeTool === "collage" ? "Collage Maker" :
+                                                                                "ID Card A4 Layout"}
                             </h3>
                             <button
                                 onClick={() => setActiveTool(null)}
@@ -1227,18 +1327,16 @@ export function Editor() {
                                                     <X className="h-3 w-3" />
                                                 </button>
                                             </div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-xs text-slate-500 w-12">Size</span>
-                                                <input
-                                                    type="range"
+                                            <div className="mb-2">
+                                                <Slider
+                                                    label="Size"
+                                                    valueDisplay={`${frontScale}%`}
                                                     min={20}
                                                     max={150}
                                                     step={5}
                                                     value={frontScale}
-                                                    onChange={(e) => setFrontScale(Number(e.target.value))}
-                                                    className="flex-1 accent-teal-400"
+                                                    onChange={(e) => setFrontScale(parseInt(e.target.value))}
                                                 />
-                                                <span className="text-xs text-white w-10 text-right">{frontScale}%</span>
                                             </div>
                                         </>
                                     ) : (
@@ -1265,18 +1363,16 @@ export function Editor() {
                                                     <X className="h-3 w-3" />
                                                 </button>
                                             </div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-xs text-slate-500 w-12">Size</span>
-                                                <input
-                                                    type="range"
+                                            <div className="mb-2">
+                                                <Slider
+                                                    label="Size"
+                                                    valueDisplay={`${backScale}%`}
                                                     min={20}
                                                     max={150}
                                                     step={5}
                                                     value={backScale}
-                                                    onChange={(e) => setBackScale(Number(e.target.value))}
-                                                    className="flex-1 accent-teal-400"
+                                                    onChange={(e) => setBackScale(parseInt(e.target.value))}
                                                 />
-                                                <span className="text-xs text-white w-10 text-right">{backScale}%</span>
                                             </div>
                                         </>
                                     )}
@@ -1291,26 +1387,19 @@ export function Editor() {
                                 )}
 
                                 <button onClick={handleCreateIDCard} disabled={!frontImage || !backImage} className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
-                                    Create A4 ID Card
+                                    <CreditCard className="h-4 w-4" />
+                                    Apply
                                 </button>
                             </div>
                         )}
 
                         {activeTool === "crop" && (
                             <div className="space-y-4">
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-2">Zoom</label>
-                                    <input
-                                        type="range"
-                                        min={1}
-                                        max={3}
-                                        step={0.1}
-                                        value={zoom}
-                                        onChange={(e) => setZoom(Number(e.target.value))}
-                                        className="w-full accent-white"
-                                    />
-                                </div>
-                                <button onClick={handleCrop} className="w-full btn-primary">Apply Crop</button>
+                                <p className="text-xs text-slate-400 mb-2">Drag on the image to select crop area.</p>
+                                <button onClick={handleCrop} className="w-full btn-primary">
+                                    <CropIcon className="h-4 w-4" />
+                                    Apply
+                                </button>
                             </div>
                         )}
 
@@ -1330,7 +1419,10 @@ export function Editor() {
                                         <option value="pdf">PDF (Download)</option>
                                     </select>
                                 </div>
-                                <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">Convert Image</button>
+                                <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">
+                                    <Download className="h-4 w-4" />
+                                    Apply
+                                </button>
                             </div>
                         )}
 
@@ -1364,26 +1456,21 @@ export function Editor() {
                         {activeTool === "compress" && (
                             <div className="space-y-4">
                                 <p className="text-xs text-slate-400">Reduce file size. Lower quality = smaller file.</p>
-                                <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs text-slate-400">Quality</label>
-                                        <span className="text-xs text-white font-medium">{compressionQuality}%</span>
-                                    </div>
-                                    <input
-                                        type="range"
+                                <div className="mb-4">
+                                    <Slider
+                                        label="Quality"
+                                        valueDisplay={`${compressionQuality}%`}
                                         min={10}
                                         max={100}
-                                        step={5}
                                         value={compressionQuality}
-                                        onChange={(e) => setCompressionQuality(Number(e.target.value))}
-                                        className="w-full accent-teal-400"
+                                        onChange={(e) => setCompressionQuality(parseInt(e.target.value))}
                                     />
-                                    <div className="flex justify-between text-xs text-slate-500 mt-1">
-                                        <span>Smaller</span>
-                                        <span>Higher Quality</span>
-                                    </div>
+                                    <p className="text-[10px] text-slate-500 mt-1">Lower quality = smaller file size</p>
                                 </div>
-                                <button onClick={handleCompress} className="w-full btn-primary">Compress Image</button>
+                                <button onClick={handleCompress} className="w-full btn-primary">
+                                    <Minimize2 className="h-4 w-4" />
+                                    Apply
+                                </button>
                             </div>
                         )}
 
@@ -1429,43 +1516,73 @@ export function Editor() {
                                         </button>
                                     ))}
                                 </div>
-                                <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Insta Filter</button>
+                                <button onClick={handleApplyFilter} className="w-full btn-primary">Apply</button>
                             </div>
                         )}
 
                         {activeTool === "adjust" && (
                             <div className="space-y-4">
                                 <p className="text-xs text-slate-400">Adjust brightness, contrast, and saturation.</p>
-                                <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs text-slate-400">Brightness</label>
-                                        <span className="text-xs text-white font-medium">{brightness}%</span>
-                                    </div>
-                                    <input type="range" min={50} max={150} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="w-full accent-teal-400" />
+                                <div className="space-y-6">
+                                    <Slider
+                                        label="Brightness"
+                                        valueDisplay={`${brightness}%`}
+                                        min={0}
+                                        max={200}
+                                        value={brightness}
+                                        onChange={(e) => setBrightness(parseInt(e.target.value))}
+                                    />
+                                    <Slider
+                                        label="Contrast"
+                                        valueDisplay={`${contrast}%`}
+                                        min={0}
+                                        max={200}
+                                        value={contrast}
+                                        onChange={(e) => setContrast(parseInt(e.target.value))}
+                                    />
+                                    <Slider
+                                        label="Saturation"
+                                        valueDisplay={`${saturation}%`}
+                                        min={0}
+                                        max={200}
+                                        value={saturation}
+                                        onChange={(e) => setSaturation(parseInt(e.target.value))}
+                                    />
                                 </div>
-                                <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs text-slate-400">Contrast</label>
-                                        <span className="text-xs text-white font-medium">{contrast}%</span>
-                                    </div>
-                                    <input type="range" min={50} max={150} value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="w-full accent-teal-400" />
-                                </div>
-                                <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs text-slate-400">Saturation</label>
-                                        <span className="text-xs text-white font-medium">{saturation}%</span>
-                                    </div>
-                                    <input type="range" min={0} max={200} value={saturation} onChange={(e) => setSaturation(Number(e.target.value))} className="w-full accent-teal-400" />
-                                </div>
-                                <button onClick={handleApplyAdjustments} className="w-full btn-primary">Apply Adjustments</button>
+                                <button onClick={handleApplyAdjustments} className="w-full btn-primary">
+                                    <Sliders className="h-4 w-4" />
+                                    Apply
+                                </button>
                             </div>
                         )}
 
                         {activeTool === "transform" && (
                             <div className="space-y-4">
                                 <p className="text-xs text-slate-400">Rotate and flip your image.</p>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <button onClick={() => handleRotate(270)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+
+                                {/* Custom Rotation Slider */}
+                                <div className="pt-4 border-t border-white/10 mb-4">
+                                    <Slider
+                                        label="Custom Rotation"
+                                        valueDisplay={`${rotation}°`}
+                                        min={-180}
+                                        max={180}
+                                        value={rotation}
+                                        onChange={(e) => setRotation(parseInt(e.target.value))}
+                                    />
+                                </div>
+                                {rotation !== 0 && (
+                                    <button
+                                        onClick={() => handleRotate(rotation)}
+                                        className="w-full btn-primary mt-2"
+                                    >
+                                        <RotateCw className="h-4 w-4" />
+                                        Apply
+                                    </button>
+                                )}
+
+                                <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-4">
+                                    <button onClick={() => handleRotate(-90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
                                         <RotateCcw className="h-4 w-4" />
                                         <span className="text-xs">Left 90°</span>
                                     </button>
@@ -1489,21 +1606,33 @@ export function Editor() {
                             <div className="space-y-4">
                                 <p className="text-xs text-slate-400">Apply blur or sharpen effect.</p>
                                 <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs text-slate-400">Blur Amount</label>
-                                        <span className="text-xs text-white font-medium">{blurAmount}px</span>
-                                    </div>
-                                    <input type="range" min={0} max={20} value={blurAmount} onChange={(e) => setBlurAmount(Number(e.target.value))} className="w-full accent-teal-400" />
+                                    <Slider
+                                        label="Blur Amount"
+                                        valueDisplay={`${blurAmount}px`}
+                                        min={0}
+                                        max={20}
+                                        value={blurAmount}
+                                        onChange={(e) => setBlurAmount(parseInt(e.target.value))}
+                                    />
                                 </div>
-                                <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">Apply Blur</button>
+                                <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">
+                                    <Droplets className="h-4 w-4" />
+                                    Apply
+                                </button>
                                 <div className="border-t border-white/10 pt-4">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs text-slate-400">Sharpen Amount</label>
-                                        <span className="text-xs text-white font-medium">{sharpenAmount}%</span>
-                                    </div>
-                                    <input type="range" min={0} max={100} value={sharpenAmount} onChange={(e) => setSharpenAmount(Number(e.target.value))} className="w-full accent-teal-400" />
+                                    <Slider
+                                        label="Sharpen Amount"
+                                        valueDisplay={`${sharpenAmount}%`}
+                                        min={0}
+                                        max={100}
+                                        value={sharpenAmount}
+                                        onChange={(e) => setSharpenAmount(parseInt(e.target.value))}
+                                    />
                                 </div>
-                                <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">Apply Sharpen</button>
+                                <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">
+                                    <Zap className="h-4 w-4" />
+                                    Apply
+                                </button>
                             </div>
                         )}
 
@@ -1514,6 +1643,167 @@ export function Editor() {
                                     <p className="text-xs text-yellow-400">Note: This is a simplified fix that targets the upper-center area where faces typically appear.</p>
                                 </div>
                                 <button onClick={handleRedEyeFix} className="w-full btn-primary">Fix Red-eye</button>
+                            </div>
+                        )}
+
+                        {activeTool === "collage" && (
+                            <div className="space-y-4">
+                                <p className="text-xs text-slate-400">Combine 2-5 images into a collage.</p>
+
+                                {/* Image List */}
+                                <div className="grid grid-cols-3 gap-2">
+                                    {collageImages.map((img, idx) => (
+                                        <div
+                                            key={idx}
+                                            onClick={() => setSelectedSlot(idx)}
+                                            className={clsx(
+                                                "relative aspect-square rounded-lg overflow-hidden border cursor-pointer transition-all",
+                                                selectedSlot === idx ? "border-teal-400 ring-2 ring-teal-500/50" : "border-white/20 hover:border-white/50"
+                                            )}
+                                        >
+                                            <img src={img} className="w-full h-full object-cover" />
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setCollageImages(prev => prev.filter((_, i) => i !== idx));
+                                                    setCollageTransforms(prev => prev.filter((_, i) => i !== idx));
+                                                    if (selectedSlot >= collageImages.length - 1) setSelectedSlot(Math.max(0, collageImages.length - 2));
+                                                }}
+                                                className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                            <div className="absolute bottom-0 left-0 bg-black/50 text-[10px] text-white px-1.5 py-0.5 rounded-tr">
+                                                #{idx + 1}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {collageImages.length < 5 && (
+                                        <div {...getCollageProps()} className="aspect-square border border-dashed border-white/20 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
+                                            <input {...getCollageInputProps()} />
+                                            <Plus className="h-6 w-6 text-slate-500" />
+                                            <span className="text-[10px] text-slate-500 mt-1">Add Img</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Layout Selector */}
+                                {collageImages.length >= 2 && (
+                                    <div>
+                                        <label className="text-xs text-slate-400 block mb-2">Select Layout</label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {AVAILABLE_LAYOUTS[collageImages.length]?.map(layout => (
+                                                <button
+                                                    key={layout}
+                                                    onClick={() => setActiveLayout(layout)}
+                                                    className={clsx(
+                                                        "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
+                                                        activeLayout === layout
+                                                            ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                            : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                    )}
+                                                >
+                                                    {layout}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Transform Controls */}
+                                {collageImages.length >= 2 && collageTransforms[selectedSlot] && (
+                                    <div className="border-t border-white/10 pt-4 space-y-3">
+                                        <div className="flex justify-between items-center">
+                                            <label className="text-xs font-bold text-teal-400">Edit Image #{selectedSlot + 1}</label>
+                                            <button
+                                                onClick={() => {
+                                                    const newT = [...collageTransforms];
+                                                    newT[selectedSlot] = { zoom: 1, panX: 0, panY: 0 };
+                                                    setCollageTransforms(newT);
+                                                }}
+                                                className="text-[10px] text-slate-400 hover:text-white"
+                                            >
+                                                Reset
+                                            </button>
+                                        </div>
+
+                                        {/* Zoom */}
+                                        <div className="mb-4">
+                                            <Slider
+                                                label="Zoom"
+                                                valueDisplay={`${collageTransforms[selectedSlot].zoom.toFixed(1)}x`}
+                                                min={0.5}
+                                                max={3}
+                                                step={0.1}
+                                                value={collageTransforms[selectedSlot].zoom}
+                                                onChange={(e) => {
+                                                    const newT = [...collageTransforms];
+                                                    newT[selectedSlot] = { ...newT[selectedSlot], zoom: parseFloat(e.target.value) };
+                                                    setCollageTransforms(newT);
+                                                }}
+                                            />
+                                        </div>
+
+                                        {/* Pan X */}
+                                        <div className="mb-4">
+                                            <Slider
+                                                label="Pan Horizontal"
+                                                min={-0.5}
+                                                max={0.5}
+                                                step={0.05}
+                                                value={collageTransforms[selectedSlot].panX}
+                                                onChange={(e) => {
+                                                    const newT = [...collageTransforms];
+                                                    newT[selectedSlot] = { ...newT[selectedSlot], panX: parseFloat(e.target.value) };
+                                                    setCollageTransforms(newT);
+                                                }}
+                                            />
+                                        </div>
+
+                                        {/* Pan Y */}
+                                        <div className="mb-4">
+                                            <Slider
+                                                label="Pan Vertical"
+                                                min={-0.5}
+                                                max={0.5}
+                                                step={0.05}
+                                                value={collageTransforms[selectedSlot].panY}
+                                                onChange={(e) => {
+                                                    const newT = [...collageTransforms];
+                                                    newT[selectedSlot] = { ...newT[selectedSlot], panY: parseFloat(e.target.value) };
+                                                    setCollageTransforms(newT);
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Actions */}
+                                {collageImages.length >= 2 && (
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setCollageImages(prev => [...prev].sort(() => Math.random() - 0.5))}
+                                            className="flex-1 btn-secondary flex items-center justify-center gap-2"
+                                        >
+                                            <Shuffle className="h-4 w-4" /> Shuffle
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                if (previewSrc) {
+                                                    pushState({ ...imageState!, processedSrc: previewSrc });
+                                                    setActiveTool(null);
+                                                    setCollageImages([]);
+                                                    setActiveLayout(null);
+                                                    setPreviewSrc(null);
+                                                }
+                                            }}
+                                            disabled={!previewSrc}
+                                            className="flex-1 btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
+                                        >
+                                            <Check className="h-4 w-4" /> Apply
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -1585,35 +1875,27 @@ export function Editor() {
 
                                 {/* Brush Size */}
                                 <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs text-slate-400">Brush Size</label>
-                                        <span className="text-xs text-white font-medium">{brushSize}px</span>
-                                    </div>
-                                    <input
-                                        type="range"
+                                    <Slider
+                                        label="Brush Size"
+                                        valueDisplay={`${brushSize}px`}
                                         min={1}
                                         max={30}
                                         value={brushSize}
-                                        onChange={(e) => setBrushSize(Number(e.target.value))}
-                                        className="w-full accent-teal-400"
+                                        onChange={(e) => setBrushSize(parseInt(e.target.value))}
                                     />
                                 </div>
 
                                 {/* Highlighter Opacity - Only show for highlighter */}
                                 {drawingMode === 'highlighter' && (
                                     <div>
-                                        <div className="flex justify-between items-center mb-2">
-                                            <label className="text-xs text-slate-400">Opacity</label>
-                                            <span className="text-xs text-white font-medium">{Math.round(highlighterOpacity * 100)}%</span>
-                                        </div>
-                                        <input
-                                            type="range"
+                                        <Slider
+                                            label="Opacity"
+                                            valueDisplay={`${Math.round(highlighterOpacity * 100)}%`}
                                             min={10}
                                             max={100}
                                             step={5}
                                             value={highlighterOpacity * 100}
-                                            onChange={(e) => setHighlighterOpacity(Number(e.target.value) / 100)}
-                                            className="w-full accent-teal-400"
+                                            onChange={(e) => setHighlighterOpacity(parseInt(e.target.value) / 100)}
                                         />
                                     </div>
                                 )}
