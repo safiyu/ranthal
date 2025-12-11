@@ -16,7 +16,7 @@ RUN npm run build
 FROM node:20-slim AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
 
 # Don't run as root
 RUN addgroup --system --gid 1001 nodejs
@@ -38,8 +38,8 @@ USER nextjs
 
 EXPOSE 3000
 
-ENV PORT 3000
+ENV PORT=3000
 # set hostname to localhost
-ENV HOSTNAME "0.0.0.0"
+ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]

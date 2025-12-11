@@ -12,6 +12,7 @@ Ranthal is a powerful, AI-powered web-based image editor designed for speed and 
 - **Smart Adjustments**: Tune brightness, contrast, saturation, and more with precision.
 - **Filters & Effects**: Apply trendy Instagram-style filters (Clarendon, Gingham, Ludwig, etc.) instantly.
 - **ID Card Maker**: Create professional ID card layouts and A4 print-ready sheets easily.
+- **Collage Maker**: Create collages layouts and A4 print-ready easily.
 - **Privacy First**: Fast and secure processing.
 
 ![Editor Interface](screenshots/editor.png)

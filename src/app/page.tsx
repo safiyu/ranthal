@@ -18,7 +18,7 @@ export default function Home() {
           </div>
 
           <h1 className="mx-auto max-w-4xl text-5xl font-bold tracking-tight text-white sm:text-7xl mb-6">
-            Refine your images <span className="text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-cyan-400">to perfection.</span>
+            Refine your images to <span className="text-teal-200">perfection.</span>
           </h1>
 
           <p className="mx-auto max-w-2xl text-lg text-slate-400 mb-10 leading-relaxed">

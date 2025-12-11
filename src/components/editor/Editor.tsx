@@ -116,7 +116,7 @@ export function Editor() {
     const [extractedText, setExtractedText] = useState("");
 
     // Compression State
-    const [compressionQuality, setCompressionQuality] = useState(60);
+    const [compressionQuality, setCompressionQuality] = useState(90);
 
     // ID Card State - Front and Back images
     const [frontImage, setFrontImage] = useState<string | null>(null);
@@ -618,7 +618,7 @@ export function Editor() {
         };
 
         // Helper to convert any image URL to data URL via canvas
-        const toDataURL = async (imageUrl: string): Promise<string> => {
+        const toDataURL = async (imageUrl: string, quality = 1.0): Promise<string> => {
             if (imageUrl.startsWith('data:')) {
                 return imageUrl;
             }
@@ -633,6 +633,12 @@ export function Editor() {
                     const ctx = canvas.getContext('2d');
                     if (ctx) {
                         ctx.drawImage(img, 0, 0);
+                        // Determine format based on src or default to png (which ignores quality, but good to have)
+                        // Actually better to force user choice or detect. 
+                        // But for download "as is" we often want png. 
+                        // However, if we want quality control for jpeg we need to specify.
+                        // Let's stick to png as default for lossless, but allow jpeg if needed.
+                        // For this helper, let's just return png as before BUT if we want to support quality we might need jpeg/webp
                         resolve(canvas.toDataURL('image/png'));
                     } else {
                         reject(new Error('Canvas context failed'));
@@ -658,7 +664,7 @@ export function Editor() {
 
         try {
             // First ensure we have a data URL
-            const dataUrl = await toDataURL(currentImage);
+            const dataUrl = await toDataURL(currentImage, 1.0);
 
             // Determine file extension and mime type from data URL
             let extension = 'png';
@@ -1015,69 +1021,71 @@ export function Editor() {
     };
 
     return (
-        <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-[var(--color-bg-page)]">
+        <div className="flex h-[calc(100vh-64px)] overflow-hidden">
             {/* Sidebar (Left) */}
             {/* Sidebar (Left) */}
-            <aside className="w-20 xl:w-72 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl flex flex-col items-center xl:items-stretch py-6 z-30 shadow-2xl overflow-hidden h-[calc(100vh-8rem)]">
-                <div className="flex-1 px-3 xl:px-6 overflow-y-auto scrollbar-hide space-y-6">
+            {imageState && (
+                <aside className="w-20 xl:w-72 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl flex flex-col items-center xl:items-stretch py-6 z-30 shadow-2xl overflow-hidden h-[calc(100vh-8rem)]">
+                    <div className="flex-1 px-3 xl:px-6 overflow-y-auto scrollbar-hide space-y-6">
 
-                    {/* Group: Essentials */}
-                    <div className="space-y-2">
-                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Essentials</h3>
-                        <ToolButton active={activeTool === "crop"} onClick={() => setActiveTool("crop")} icon={<CropIcon />} label="Crop & Resize" disabled={!imageState} />
-                        <ToolButton active={activeTool === "hand"} onClick={() => setActiveTool("hand")} icon={<Hand />} label="Pan Tool" disabled={!imageState} />
-                        <ToolButton active={activeTool === "id-card"} onClick={() => { setActiveTool("id-card"); if (currentImage && !frontImage) setFrontImage(currentImage); }} icon={<CreditCard />} label="ID Card" disabled={!imageState} />
+                        {/* Group: Essentials */}
+                        <div className="space-y-2">
+                            <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Essentials</h3>
+                            <ToolButton active={activeTool === "crop"} onClick={() => setActiveTool("crop")} icon={<CropIcon />} label="Crop & Resize" disabled={!imageState} />
+                            <ToolButton active={activeTool === "hand"} onClick={() => setActiveTool("hand")} icon={<Hand />} label="Pan Tool" disabled={!imageState} />
+                            <ToolButton active={activeTool === "id-card"} onClick={() => { setActiveTool("id-card"); if (currentImage && !frontImage) setFrontImage(currentImage); }} icon={<CreditCard />} label="ID Card" disabled={!imageState} />
+                        </div>
+
+                        {/* Group: Adjustments */}
+                        <div className="space-y-2">
+                            <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Adjustments</h3>
+                            <ToolButton active={activeTool === "filters"} onClick={() => setActiveTool("filters")} icon={<Palette />} label="Filters" disabled={!imageState} />
+                            <ToolButton active={activeTool === "adjust"} onClick={() => setActiveTool("adjust")} icon={<SlidersHorizontal />} label="Tune Image" disabled={!imageState} />
+                            <ToolButton active={activeTool === "blur"} onClick={() => setActiveTool("blur")} icon={<Focus />} label="Blur & Sharpen" disabled={!imageState} />
+                            <ToolButton active={activeTool === "transform"} onClick={() => setActiveTool("transform")} icon={<RotateCw />} label="Transform" disabled={!imageState} />
+                        </div>
+
+                        {/* Group: Social */}
+                        <div className="space-y-2">
+                            <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Social</h3>
+                            <ToolButton active={activeTool === "social-filters"} onClick={() => setActiveTool("social-filters")} icon={<Filter />} label="Insta Filters" disabled={!imageState} />
+                        </div>
+
+                        {/* Group: Smart Actions */}
+                        <div className="space-y-2">
+                            <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Smart Tools</h3>
+                            <ToolButton active={activeTool === "bg-remove"} onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }} icon={<Layers />} label="Remove BG" disabled={!imageState} />
+                            <ToolButton active={activeTool === "collage"} onClick={() => {
+                                setActiveTool("collage");
+                                if (currentImage && collageImages.length === 0) {
+                                    setCollageImages([currentImage]);
+                                    setCollageTransforms([{ zoom: 1, panX: 0, panY: 0 }]);
+                                }
+                            }} icon={<LayoutGrid />} label="Collage" disabled={!imageState} />
+                            <ToolButton active={activeTool === "ocr"} onClick={handleOcr} icon={<ScanText />} label="Extract Text" disabled={!imageState} />
+                            <ToolButton active={activeTool === "redeye"} onClick={() => setActiveTool("redeye")} icon={<Eye />} label="Red-eye Fix" disabled={!imageState} />
+                        </div>
+
+                        {/* Group: Creative */}
+                        <div className="space-y-2">
+                            <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Creative</h3>
+                            <ToolButton active={activeTool === "draw"} onClick={() => setActiveTool("draw")} icon={<Pencil />} label="Draw" disabled={!imageState} />
+                        </div>
+
+                        {/* Group: Utilities */}
+                        <div className="space-y-2">
+                            <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Export</h3>
+                            <ToolButton active={activeTool === "convert"} onClick={() => setActiveTool("convert")} icon={<FileType />} label="Format Convert" disabled={!imageState} />
+                            <ToolButton active={activeTool === "compress"} onClick={() => setActiveTool("compress")} icon={<Minimize2 />} label="Compress" disabled={!imageState} />
+                        </div>
+
+
                     </div>
-
-                    {/* Group: Adjustments */}
-                    <div className="space-y-2">
-                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Adjustments</h3>
-                        <ToolButton active={activeTool === "filters"} onClick={() => setActiveTool("filters")} icon={<Palette />} label="Filters" disabled={!imageState} />
-                        <ToolButton active={activeTool === "adjust"} onClick={() => setActiveTool("adjust")} icon={<SlidersHorizontal />} label="Tune Image" disabled={!imageState} />
-                        <ToolButton active={activeTool === "blur"} onClick={() => setActiveTool("blur")} icon={<Focus />} label="Blur & Sharpen" disabled={!imageState} />
-                        <ToolButton active={activeTool === "transform"} onClick={() => setActiveTool("transform")} icon={<RotateCw />} label="Transform" disabled={!imageState} />
-                    </div>
-
-                    {/* Group: Social */}
-                    <div className="space-y-2">
-                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Social</h3>
-                        <ToolButton active={activeTool === "social-filters"} onClick={() => setActiveTool("social-filters")} icon={<Filter />} label="Insta Filters" disabled={!imageState} />
-                    </div>
-
-                    {/* Group: Smart Actions */}
-                    <div className="space-y-2">
-                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Smart Tools</h3>
-                        <ToolButton active={activeTool === "bg-remove"} onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }} icon={<Layers />} label="Remove BG" disabled={!imageState} />
-                        <ToolButton active={activeTool === "collage"} onClick={() => {
-                            setActiveTool("collage");
-                            if (currentImage && collageImages.length === 0) {
-                                setCollageImages([currentImage]);
-                                setCollageTransforms([{ zoom: 1, panX: 0, panY: 0 }]);
-                            }
-                        }} icon={<LayoutGrid />} label="Collage" disabled={!imageState} />
-                        <ToolButton active={activeTool === "ocr"} onClick={handleOcr} icon={<ScanText />} label="Extract Text" disabled={!imageState} />
-                        <ToolButton active={activeTool === "redeye"} onClick={() => setActiveTool("redeye")} icon={<Eye />} label="Red-eye Fix" disabled={!imageState} />
-                    </div>
-
-                    {/* Group: Creative */}
-                    <div className="space-y-2">
-                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Creative</h3>
-                        <ToolButton active={activeTool === "draw"} onClick={() => setActiveTool("draw")} icon={<Pencil />} label="Draw" disabled={!imageState} />
-                    </div>
-
-                    {/* Group: Utilities */}
-                    <div className="space-y-2">
-                        <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Export</h3>
-                        <ToolButton active={activeTool === "convert"} onClick={() => setActiveTool("convert")} icon={<FileType />} label="Format Convert" disabled={!imageState} />
-                        <ToolButton active={activeTool === "compress"} onClick={() => setActiveTool("compress")} icon={<Minimize2 />} label="Compress" disabled={!imageState} />
-                    </div>
-
-
-                </div>
-            </aside>
+                </aside>
+            )}
 
             {/* Main Canvas Area */}
-            <main className="flex-1 relative bg-[var(--color-bg-page)] overflow-hidden flex items-center justify-center p-8">
+            <main className="flex-1 relative overflow-hidden flex items-center justify-center p-8">
 
                 {/* Top Toolbar (Undo/Redo/Zoom) */}
                 {imageState && (

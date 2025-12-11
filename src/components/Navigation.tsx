@@ -4,15 +4,17 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { LogOut, User, ChevronDown } from "lucide-react";
+import { LogOut, User, ChevronDown, Image as ImageIcon } from "lucide-react";
 import { useSession, signOut } from "next-auth/react";
 import { AboutButton } from "@/components/AboutButton";
+import { WallpaperPicker } from "@/components/WallpaperPicker";
 import { useState, useEffect, useRef } from "react";
 
 export function Navigation() {
     const pathname = usePathname();
     const { data: session, status } = useSession();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [isWallpaperPickerOpen, setIsWallpaperPickerOpen] = useState(false);
     const profileRef = useRef<HTMLDivElement>(null);
 
     // Close dropdown when clicking outside
@@ -57,6 +59,13 @@ export function Navigation() {
 
                 {/* Auth Buttons - Right side */}
                 <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => setIsWallpaperPickerOpen(true)}
+                        className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                        title="Change Wallpaper"
+                    >
+                        <ImageIcon className="h-5 w-5" />
+                    </button>
                     <AboutButton />
                     {status === "loading" ? (
                         <div className="w-20 h-8 bg-white/10 rounded-full animate-pulse" />
@@ -126,6 +135,8 @@ export function Navigation() {
 
             {/* Ambient Glow */}
             <div className="absolute inset-0 -z-10 bg-gradient-to-r from-teal-500/10 via-cyan-500/10 to-blue-500/10 blur-3xl opacity-0 group-hover/nav:opacity-100 transition-opacity duration-700 rounded-2xl" />
+
+            <WallpaperPicker isOpen={isWallpaperPickerOpen} onClose={() => setIsWallpaperPickerOpen(false)} />
         </nav >
     );
 }

@@ -3,6 +3,7 @@ import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import { Navigation } from "@/components/Navigation";
 import { Providers } from "@/components/Providers";
+import { WallpaperBackground } from "@/components/WallpaperBackground";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
@@ -21,6 +22,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} ${outfit.variable}`} suppressHydrationWarning>
         <Providers>
+          <WallpaperBackground />
           <Navigation />
           <main className="min-h-screen pt-32">{children}</main>
         </Providers>
