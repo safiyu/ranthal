@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { count } from "drizzle-orm";
@@ -20,5 +21,9 @@ export default async function LoginPage() {
         redirect("/setup");
     }
 
-    return <LoginForm />;
+    return (
+        <Suspense fallback={<div className="text-white text-center">Loading...</div>}>
+            <LoginForm />
+        </Suspense>
+    );
 }

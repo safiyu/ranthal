@@ -94,8 +94,23 @@ export async function deleteUser(userId: string) {
         console.error("Failed to delete user:", error);
         return { message: "Failed to delete user." };
     }
-    // Revalidation is handled by calling component or server action return
-    // But since this is likely called from a form or button, we might want to revalidatePath
     // import { revalidatePath } from "next/cache"; 
     // revalidatePath("/admin/users");
+}
+
+export async function approveUser(userId: string) {
+    try {
+        await requireAdmin();
+    } catch {
+        return { message: "Unauthorized" };
+    }
+
+    try {
+        await db.update(users).set({ approved: true }).where(eq(users.id, userId));
+        revalidatePath("/admin/users");
+        return { success: true, message: "User approved successfully." };
+    } catch (error) {
+        console.error("Failed to approve user:", error);
+        return { message: "Failed to approve user." };
+    }
 }

@@ -1085,7 +1085,7 @@ export function Editor() {
             )}
 
             {/* Main Canvas Area */}
-            <main className="flex-1 relative overflow-hidden flex items-center justify-center p-8">
+            <main className="flex-1 relative overflow-hidden flex items-center justify-center p-8 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/30 backdrop-blur-sm shadow-inner h-[calc(100vh-8rem)]">
 
                 {/* Top Toolbar (Undo/Redo/Zoom) */}
                 {imageState && (
@@ -1194,40 +1194,48 @@ export function Editor() {
                                 onMouseUp={() => setIsPanning(false)}
                                 onMouseLeave={() => setIsPanning(false)}
                             >
-                                <img
-                                    ref={imageRef}
-                                    src={currentImage || ""}
-                                    alt="Work in progress"
-                                    className="max-w-full max-h-full object-contain shadow-2xl rounded-sm transition-all"
+                                <div
+                                    className="relative inline-flex items-center justify-center transition-all rounded-xl border border-white/20 shadow-[0_0_50px_-12px_rgba(45,212,191,0.5)] ring-1 ring-white/10"
                                     style={{
-                                        filter: getPreviewFilter(),
                                         transform: `scale(${viewZoom / 100}) ${activeTool === "transform" && rotation !== 0 ? `rotate(${rotation}deg)` : ""}`
                                     }}
-                                />
-                                {activeTool === "draw" && (
-                                    <>
-                                        <canvas
-                                            ref={canvasRef}
-                                            width={imageRef.current?.clientWidth || 800}
-                                            height={imageRef.current?.clientHeight || 600}
-                                            className="absolute inset-0 cursor-crosshair"
-                                            onMouseDown={startDrawing}
-                                            onMouseMove={draw}
-                                            onMouseUp={stopDrawing}
-                                            onMouseLeave={stopDrawing}
-                                        />
-                                        <canvas
-                                            ref={tempCanvasRef}
-                                            width={imageRef.current?.clientWidth || 800}
-                                            height={imageRef.current?.clientHeight || 600}
-                                            className="absolute inset-0 pointer-events-none"
-                                            style={{
-                                                opacity: drawingMode === 'highlighter' ? highlighterOpacity : 1,
-                                                mixBlendMode: drawingMode === 'highlighter' ? 'multiply' : 'normal'
-                                            }}
-                                        />
-                                    </>
-                                )}
+                                >
+                                    <img
+                                        ref={imageRef}
+                                        src={currentImage || ""}
+                                        alt="Work in progress"
+                                        className="max-w-[calc(100vw-8rem)] max-h-[calc(100vh-12rem)] object-contain rounded-lg"
+                                        style={{
+                                            filter: getPreviewFilter(),
+                                        }}
+                                    />
+                                    {/* Overlay canvases need to be inside the transformed container to rotate/scale with it */}
+                                    {activeTool === "draw" && (
+                                        <>
+                                            <canvas
+                                                ref={canvasRef}
+                                                width={imageRef.current?.naturalWidth || 800}
+                                                height={imageRef.current?.naturalHeight || 600}
+                                                className="absolute inset-0 cursor-crosshair w-full h-full"
+                                                onMouseDown={startDrawing}
+                                                onMouseMove={draw}
+                                                onMouseUp={stopDrawing}
+                                                onMouseLeave={stopDrawing}
+                                            />
+                                            <canvas
+                                                ref={tempCanvasRef}
+                                                width={imageRef.current?.naturalWidth || 800}
+                                                height={imageRef.current?.naturalHeight || 600}
+                                                className="absolute inset-0 pointer-events-none w-full h-full"
+                                                style={{
+                                                    opacity: drawingMode === 'highlighter' ? highlighterOpacity : 1,
+                                                    mixBlendMode: drawingMode === 'highlighter' ? 'multiply' : 'normal'
+                                                }}
+                                            />
+                                        </>
+                                    )}
+                                </div>
+                                {activeTool === "draw" && null /* Canvases moved inside wrapper */}
                             </div>
                         )}
                     </div>
@@ -1288,628 +1296,666 @@ export function Editor() {
 
 
 
-            {/* Properties Panel (Right side) */}
+            {/* Properties Panel (Right side) - Always Visible if image loaded */}
             {
-                (activeTool === "crop" || activeTool === "ocr" || activeTool === "compress" || activeTool === "id-card" || activeTool === "convert" || activeTool === "filters" || activeTool === "social-filters" || activeTool === "adjust" || activeTool === "transform" || activeTool === "blur" || activeTool === "redeye" || activeTool === "draw" || activeTool === "collage") && (
+                imageState && (
                     <aside className="w-80 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl p-6 z-20 flex flex-col transition-all overflow-y-auto shadow-2xl animate-slide-in-right h-[calc(100vh-8rem)]">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-white font-bold">
-                                {activeTool === "crop" ? "Crop Settings" :
-                                    activeTool === "ocr" ? "Extracted Text" :
-                                        activeTool === "compress" ? "Compression" :
-                                            activeTool === "convert" ? "Format Conversion" :
-                                                activeTool === "filters" ? "Filters" :
-                                                    activeTool === "adjust" ? "Adjustments" :
-                                                        activeTool === "transform" ? "Transform" :
-                                                            activeTool === "blur" ? "Blur / Sharpen" :
-                                                                activeTool === "redeye" ? "Red-eye Fix" :
-                                                                    activeTool === "draw" ? "Draw" :
-                                                                        activeTool === "social-filters" ? "Instagram Filters" :
-                                                                            activeTool === "collage" ? "Collage Maker" :
-                                                                                "ID Card A4 Layout"}
-                            </h3>
-                            <button
-                                onClick={() => setActiveTool(null)}
-                                className="text-slate-400 hover:text-white"
-                            >
-                                <X className="h-4 w-4" />
-                            </button>
-                        </div>
-
-                        {activeTool === "id-card" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Combine front & back for A4 printing. The first image is set as the front.</p>
-
-                                {/* Front Image */}
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-2">Front Image</label>
-                                    {frontImage ? (
-                                        <>
-                                            <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
-                                                <img src={frontImage || ""} alt="Front" className="w-full h-full object-cover" style={{ transform: `scale(${frontScale / 100})` }} />
-                                                <button onClick={() => setFrontImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <X className="h-3 w-3" />
-                                                </button>
-                                            </div>
-                                            <div className="mb-2">
-                                                <Slider
-                                                    label="Size"
-                                                    valueDisplay={`${frontScale}%`}
-                                                    min={20}
-                                                    max={150}
-                                                    step={5}
-                                                    value={frontScale}
-                                                    onChange={(e) => setFrontScale(parseInt(e.target.value))}
-                                                />
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div className="border border-dashed border-white/20 rounded-lg p-4 flex items-center justify-center text-slate-500 text-xs">
-                                            No front image selected
-                                        </div>
-                                    )}
+                        {!activeTool ? (
+                            <div className="flex-1 flex flex-col items-center justify-center text-center opacity-50">
+                                <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
+                                    <Sliders className="h-8 w-8 text-white/50" />
                                 </div>
-
-                                {/* Back Image */}
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-2">Back Image</label>
-                                    {!backImage ? (
-                                        <div {...getBackImageProps()} className="border border-dashed border-white/20 rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
-                                            <input {...getBackImageInputProps()} />
-                                            <ImageIcon className="h-6 w-6 text-slate-500 mb-2" />
-                                            <span className="text-xs text-slate-400">Upload Back Image</span>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
-                                                <img src={backImage || ""} alt="Back" className="w-full h-full object-cover" style={{ transform: `scale(${backScale / 100})` }} />
-                                                <button onClick={() => setBackImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <X className="h-3 w-3" />
-                                                </button>
-                                            </div>
-                                            <div className="mb-2">
-                                                <Slider
-                                                    label="Size"
-                                                    valueDisplay={`${backScale}%`}
-                                                    min={20}
-                                                    max={150}
-                                                    step={5}
-                                                    value={backScale}
-                                                    onChange={(e) => setBackScale(parseInt(e.target.value))}
-                                                />
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-
-                                {/* Swap Button */}
-                                {frontImage && backImage && (
-                                    <button onClick={handleSwapImages} className="w-full btn-secondary flex items-center justify-center gap-2">
-                                        <ArrowUpDown className="h-4 w-4" />
-                                        Swap Front & Back
-                                    </button>
-                                )}
-
-                                <button onClick={handleCreateIDCard} disabled={!frontImage || !backImage} className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
-                                    <CreditCard className="h-4 w-4" />
-                                    Apply
-                                </button>
+                                <h3 className="text-lg font-medium text-white mb-2">Properties</h3>
+                                <p className="text-sm text-slate-400">Select a tool from the left to adjust settings.</p>
                             </div>
-                        )}
-
-                        {activeTool === "crop" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400 mb-2">Drag on the image to select crop area.</p>
-                                <button onClick={handleCrop} className="w-full btn-primary">
-                                    <CropIcon className="h-4 w-4" />
-                                    Apply
-                                </button>
-                            </div>
-                        )}
-
-                        {activeTool === "convert" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400 mb-2">Convert image format.</p>
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-2">Output Format</label>
-                                    <select
-                                        value={selectedFormat}
-                                        onChange={(e) => setSelectedFormat(e.target.value as "png" | "jpeg" | "webp" | "pdf")}
-                                        className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/50"
-                                    >
-                                        <option value="png">PNG</option>
-                                        <option value="jpeg">JPG</option>
-                                        <option value="webp">WebP</option>
-                                        <option value="pdf">PDF (Download)</option>
-                                    </select>
-                                </div>
-                                <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">
-                                    <Download className="h-4 w-4" />
-                                    Apply
-                                </button>
-                            </div>
-                        )}
-
-                        {activeTool === "ocr" && (
-                            <div className="flex-1 flex flex-col min-h-0">
-                                {isProcessing ? (
-                                    <div className="flex flex-col items-center justify-center py-8">
-                                        <Wand2 className="h-6 w-6 text-white animate-spin mb-2" />
-                                        <p className="text-xs text-slate-400">Extracting text...</p>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <textarea
-                                            className="flex-1 w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:border-white/50 mb-4"
-                                            value={extractedText}
-                                            readOnly
-                                            placeholder="Text will appear here..."
-                                        />
-                                        <button
-                                            className="w-full btn-secondary flex items-center justify-center gap-2"
-                                            onClick={() => { navigator.clipboard.writeText(extractedText) }}
-                                            disabled={!extractedText}
-                                        >
-                                            Copy to Clipboard
-                                        </button>
-                                    </>
-                                )}
-                            </div>
-                        )}
-
-                        {activeTool === "compress" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Reduce file size. Lower quality = smaller file.</p>
-                                <div className="mb-4">
-                                    <Slider
-                                        label="Quality"
-                                        valueDisplay={`${compressionQuality}%`}
-                                        min={10}
-                                        max={100}
-                                        value={compressionQuality}
-                                        onChange={(e) => setCompressionQuality(parseInt(e.target.value))}
-                                    />
-                                    <p className="text-[10px] text-slate-500 mt-1">Lower quality = smaller file size</p>
-                                </div>
-                                <button onClick={handleCompress} className="w-full btn-primary">
-                                    <Minimize2 className="h-4 w-4" />
-                                    Apply
-                                </button>
-                            </div>
-                        )}
-
-                        {activeTool === "filters" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Apply preset image filters.</p>
-                                <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
-                                    {(['grayscale', 'sepia', 'vintage', 'warm', 'cool', 'highContrast', 'noir', 'fade', 'kodak', 'technicolor', 'polaroid', 'dramatic', 'golden', 'cyberpunk'] as const).map((filter) => (
-                                        <button
-                                            key={filter}
-                                            onClick={() => setSelectedFilter(filter)}
-                                            className={clsx(
-                                                "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
-                                                selectedFilter === filter
-                                                    ? "border-teal-400 bg-teal-500/20 text-teal-300"
-                                                    : "border-white/10 text-slate-400 hover:bg-white/5"
-                                            )}
-                                        >
-                                            {filter.replace(/([A-Z])/g, ' $1').trim()}
-                                        </button>
-                                    ))}
-                                </div>
-                                <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Filter</button>
-                            </div>
-                        )}
-
-                        {activeTool === "social-filters" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Trendy social media filters.</p>
-                                <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
-                                    {(['clarendon', 'gingham', 'juno', 'lark', 'ludwig', 'valencia', 'moon', 'reyes', 'slumber', 'crema', 'aden', 'perpetua'] as const).map((filter) => (
-                                        <button
-                                            key={filter}
-                                            onClick={() => setSelectedFilter(filter)}
-                                            className={clsx(
-                                                "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
-                                                selectedFilter === filter
-                                                    ? "border-teal-400 bg-teal-500/20 text-teal-300"
-                                                    : "border-white/10 text-slate-400 hover:bg-white/5"
-                                            )}
-                                        >
-                                            {filter}
-                                        </button>
-                                    ))}
-                                </div>
-                                <button onClick={handleApplyFilter} className="w-full btn-primary">Apply</button>
-                            </div>
-                        )}
-
-                        {activeTool === "adjust" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Adjust brightness, contrast, and saturation.</p>
-                                <div className="space-y-6">
-                                    <Slider
-                                        label="Brightness"
-                                        valueDisplay={`${brightness}%`}
-                                        min={0}
-                                        max={200}
-                                        value={brightness}
-                                        onChange={(e) => setBrightness(parseInt(e.target.value))}
-                                    />
-                                    <Slider
-                                        label="Contrast"
-                                        valueDisplay={`${contrast}%`}
-                                        min={0}
-                                        max={200}
-                                        value={contrast}
-                                        onChange={(e) => setContrast(parseInt(e.target.value))}
-                                    />
-                                    <Slider
-                                        label="Saturation"
-                                        valueDisplay={`${saturation}%`}
-                                        min={0}
-                                        max={200}
-                                        value={saturation}
-                                        onChange={(e) => setSaturation(parseInt(e.target.value))}
-                                    />
-                                </div>
-                                <button onClick={handleApplyAdjustments} className="w-full btn-primary">
-                                    <Sliders className="h-4 w-4" />
-                                    Apply
-                                </button>
-                            </div>
-                        )}
-
-                        {activeTool === "transform" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Rotate and flip your image.</p>
-
-                                {/* Custom Rotation Slider */}
-                                <div className="pt-4 border-t border-white/10 mb-4">
-                                    <Slider
-                                        label="Custom Rotation"
-                                        valueDisplay={`${rotation}°`}
-                                        min={-180}
-                                        max={180}
-                                        value={rotation}
-                                        onChange={(e) => setRotation(parseInt(e.target.value))}
-                                    />
-                                </div>
-                                {rotation !== 0 && (
+                        ) : (
+                            <>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-white font-bold">
+                                        {activeTool === "crop" ? "Crop Settings" :
+                                            activeTool === "ocr" ? "Extracted Text" :
+                                                activeTool === "compress" ? "Compression" :
+                                                    activeTool === "convert" ? "Format Conversion" :
+                                                        activeTool === "filters" ? "Filters" :
+                                                            activeTool === "adjust" ? "Adjustments" :
+                                                                activeTool === "transform" ? "Transform" :
+                                                                    activeTool === "blur" ? "Blur / Sharpen" :
+                                                                        activeTool === "redeye" ? "Red-eye Fix" :
+                                                                            activeTool === "draw" ? "Draw" :
+                                                                                activeTool === "social-filters" ? "Instagram Filters" :
+                                                                                    activeTool === "collage" ? "Collage Maker" :
+                                                                                        activeTool === "hand" ? "Pan Tool" :
+                                                                                            activeTool === "bg-remove" ? "Background Removal" :
+                                                                                                "ID Card A4 Layout"}
+                                    </h3>
                                     <button
-                                        onClick={() => handleRotate(rotation)}
-                                        className="w-full btn-primary mt-2"
+                                        onClick={() => setActiveTool(null)}
+                                        className="text-slate-400 hover:text-white"
                                     >
-                                        <RotateCw className="h-4 w-4" />
-                                        Apply
+                                        <X className="h-4 w-4" />
                                     </button>
+                                </div>
+
+                                {activeTool === "hand" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Move around the image when zoomed in.</p>
+                                        <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+                                            <ul className="text-xs text-slate-300 space-y-2 list-disc pl-4">
+                                                <li>Click and drag on the image to pan.</li>
+                                                <li>Use the zoom controls in the top toolbar to zoom in/out.</li>
+                                                <li>Double click to reset view.</li>
+                                            </ul>
+                                        </div>
+                                    </div>
                                 )}
 
-                                <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-4">
-                                    <button onClick={() => handleRotate(-90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                        <RotateCcw className="h-4 w-4" />
-                                        <span className="text-xs">Left 90°</span>
-                                    </button>
-                                    <button onClick={() => handleRotate(90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                        <RotateCw className="h-4 w-4" />
-                                        <span className="text-xs">Right 90°</span>
-                                    </button>
-                                    <button onClick={() => handleFlip('horizontal')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                        <FlipHorizontal className="h-4 w-4" />
-                                        <span className="text-xs">Flip H</span>
-                                    </button>
-                                    <button onClick={() => handleFlip('vertical')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                        <FlipVertical className="h-4 w-4" />
-                                        <span className="text-xs">Flip V</span>
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+                                {activeTool === "bg-remove" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Remove image background automatically.</p>
+                                        <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex flex-col items-center text-center">
+                                            <Wand2 className="h-8 w-8 text-teal-400 mb-2" />
+                                            <p className="text-sm text-slate-300 font-medium">Removing Background...</p>
+                                            <p className="text-xs text-slate-500 mt-1">This may take a few seconds.</p>
+                                        </div>
+                                    </div>
+                                )}
 
-                        {activeTool === "blur" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Apply blur or sharpen effect.</p>
-                                <div>
-                                    <Slider
-                                        label="Blur Amount"
-                                        valueDisplay={`${blurAmount}px`}
-                                        min={0}
-                                        max={20}
-                                        value={blurAmount}
-                                        onChange={(e) => setBlurAmount(parseInt(e.target.value))}
-                                    />
-                                </div>
-                                <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">
-                                    <Droplets className="h-4 w-4" />
-                                    Apply
-                                </button>
-                                <div className="border-t border-white/10 pt-4">
-                                    <Slider
-                                        label="Sharpen Amount"
-                                        valueDisplay={`${sharpenAmount}%`}
-                                        min={0}
-                                        max={100}
-                                        value={sharpenAmount}
-                                        onChange={(e) => setSharpenAmount(parseInt(e.target.value))}
-                                    />
-                                </div>
-                                <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">
-                                    <Zap className="h-4 w-4" />
-                                    Apply
-                                </button>
-                            </div>
-                        )}
+                                {activeTool === "id-card" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Combine front & back for A4 printing. The first image is set as the front.</p>
 
-                        {activeTool === "redeye" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Click the button to automatically detect and fix red-eye in the center area of the image.</p>
-                                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-                                    <p className="text-xs text-yellow-400">Note: This is a simplified fix that targets the upper-center area where faces typically appear.</p>
-                                </div>
-                                <button onClick={handleRedEyeFix} className="w-full btn-primary">Fix Red-eye</button>
-                            </div>
-                        )}
-
-                        {activeTool === "collage" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Combine 2-5 images into a collage.</p>
-
-                                {/* Image List */}
-                                <div className="grid grid-cols-3 gap-2">
-                                    {collageImages.map((img, idx) => (
-                                        <div
-                                            key={idx}
-                                            onClick={() => setSelectedSlot(idx)}
-                                            className={clsx(
-                                                "relative aspect-square rounded-lg overflow-hidden border cursor-pointer transition-all",
-                                                selectedSlot === idx ? "border-teal-400 ring-2 ring-teal-500/50" : "border-white/20 hover:border-white/50"
+                                        {/* Front Image */}
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-2">Front Image</label>
+                                            {frontImage ? (
+                                                <>
+                                                    <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
+                                                        <img src={frontImage || ""} alt="Front" className="w-full h-full object-cover" style={{ transform: `scale(${frontScale / 100})` }} />
+                                                        <button onClick={() => setFrontImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                    <div className="mb-2">
+                                                        <Slider
+                                                            label="Size"
+                                                            valueDisplay={`${frontScale}%`}
+                                                            min={20}
+                                                            max={150}
+                                                            step={5}
+                                                            value={frontScale}
+                                                            onChange={(e) => setFrontScale(parseInt(e.target.value))}
+                                                        />
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <div className="border border-dashed border-white/20 rounded-lg p-4 flex items-center justify-center text-slate-500 text-xs">
+                                                    No front image selected
+                                                </div>
                                             )}
-                                        >
-                                            <img src={img} className="w-full h-full object-cover" />
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setCollageImages(prev => prev.filter((_, i) => i !== idx));
-                                                    setCollageTransforms(prev => prev.filter((_, i) => i !== idx));
-                                                    if (selectedSlot >= collageImages.length - 1) setSelectedSlot(Math.max(0, collageImages.length - 2));
-                                                }}
-                                                className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                                            >
-                                                <X className="h-3 w-3" />
-                                            </button>
-                                            <div className="absolute bottom-0 left-0 bg-black/50 text-[10px] text-white px-1.5 py-0.5 rounded-tr">
-                                                #{idx + 1}
-                                            </div>
                                         </div>
-                                    ))}
-                                    {collageImages.length < 5 && (
-                                        <div {...getCollageProps()} className="aspect-square border border-dashed border-white/20 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
-                                            <input {...getCollageInputProps()} />
-                                            <Plus className="h-6 w-6 text-slate-500" />
-                                            <span className="text-[10px] text-slate-500 mt-1">Add Img</span>
-                                        </div>
-                                    )}
-                                </div>
 
-                                {/* Layout Selector */}
-                                {collageImages.length >= 2 && (
-                                    <div>
-                                        <label className="text-xs text-slate-400 block mb-2">Select Layout</label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {AVAILABLE_LAYOUTS[collageImages.length]?.map(layout => (
+                                        {/* Back Image */}
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-2">Back Image</label>
+                                            {!backImage ? (
+                                                <div {...getBackImageProps()} className="border border-dashed border-white/20 rounded-lg p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
+                                                    <input {...getBackImageInputProps()} />
+                                                    <ImageIcon className="h-6 w-6 text-slate-500 mb-2" />
+                                                    <span className="text-xs text-slate-400">Upload Back Image</span>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <div className="relative aspect-video rounded-lg overflow-hidden border border-white/20 group mb-2">
+                                                        <img src={backImage || ""} alt="Back" className="w-full h-full object-cover" style={{ transform: `scale(${backScale / 100})` }} />
+                                                        <button onClick={() => setBackImage(null)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                    <div className="mb-2">
+                                                        <Slider
+                                                            label="Size"
+                                                            valueDisplay={`${backScale}%`}
+                                                            min={20}
+                                                            max={150}
+                                                            step={5}
+                                                            value={backScale}
+                                                            onChange={(e) => setBackScale(parseInt(e.target.value))}
+                                                        />
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {/* Swap Button */}
+                                        {frontImage && backImage && (
+                                            <button onClick={handleSwapImages} className="w-full btn-secondary flex items-center justify-center gap-2">
+                                                <ArrowUpDown className="h-4 w-4" />
+                                                Swap Front & Back
+                                            </button>
+                                        )}
+
+                                        <button onClick={handleCreateIDCard} disabled={!frontImage || !backImage} className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+                                            <CreditCard className="h-4 w-4" />
+                                            Apply
+                                        </button>
+                                    </div>
+                                )}
+
+                                {activeTool === "crop" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400 mb-2">Drag on the image to select crop area.</p>
+                                        <button onClick={handleCrop} className="w-full btn-primary">
+                                            <CropIcon className="h-4 w-4" />
+                                            Apply
+                                        </button>
+                                    </div>
+                                )}
+
+                                {activeTool === "convert" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400 mb-2">Convert image format.</p>
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-2">Output Format</label>
+                                            <select
+                                                value={selectedFormat}
+                                                onChange={(e) => setSelectedFormat(e.target.value as "png" | "jpeg" | "webp" | "pdf")}
+                                                className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/50"
+                                            >
+                                                <option value="png">PNG</option>
+                                                <option value="jpeg">JPG</option>
+                                                <option value="webp">WebP</option>
+                                                <option value="pdf">PDF (Download)</option>
+                                            </select>
+                                        </div>
+                                        <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">
+                                            <Download className="h-4 w-4" />
+                                            Apply
+                                        </button>
+                                    </div>
+                                )}
+
+                                {activeTool === "ocr" && (
+                                    <div className="flex-1 flex flex-col min-h-0">
+                                        {isProcessing ? (
+                                            <div className="flex flex-col items-center justify-center py-8">
+                                                <Wand2 className="h-6 w-6 text-white animate-spin mb-2" />
+                                                <p className="text-xs text-slate-400">Extracting text...</p>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <textarea
+                                                    className="flex-1 w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:border-white/50 mb-4"
+                                                    value={extractedText}
+                                                    readOnly
+                                                    placeholder="Text will appear here..."
+                                                />
                                                 <button
-                                                    key={layout}
-                                                    onClick={() => setActiveLayout(layout)}
+                                                    className="w-full btn-secondary flex items-center justify-center gap-2"
+                                                    onClick={() => { navigator.clipboard.writeText(extractedText) }}
+                                                    disabled={!extractedText}
+                                                >
+                                                    Copy to Clipboard
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+
+                                {activeTool === "compress" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Reduce file size. Lower quality = smaller file.</p>
+                                        <div className="mb-4">
+                                            <Slider
+                                                label="Quality"
+                                                valueDisplay={`${compressionQuality}%`}
+                                                min={10}
+                                                max={100}
+                                                value={compressionQuality}
+                                                onChange={(e) => setCompressionQuality(parseInt(e.target.value))}
+                                            />
+                                            <p className="text-[10px] text-slate-500 mt-1">Lower quality = smaller file size</p>
+                                        </div>
+                                        <button onClick={handleCompress} className="w-full btn-primary">
+                                            <Minimize2 className="h-4 w-4" />
+                                            Apply
+                                        </button>
+                                    </div>
+                                )}
+
+                                {activeTool === "filters" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Apply preset image filters.</p>
+                                        <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
+                                            {(['grayscale', 'sepia', 'vintage', 'warm', 'cool', 'highContrast', 'noir', 'fade', 'kodak', 'technicolor', 'polaroid', 'dramatic', 'golden', 'cyberpunk'] as const).map((filter) => (
+                                                <button
+                                                    key={filter}
+                                                    onClick={() => setSelectedFilter(filter)}
                                                     className={clsx(
                                                         "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
-                                                        activeLayout === layout
+                                                        selectedFilter === filter
                                                             ? "border-teal-400 bg-teal-500/20 text-teal-300"
                                                             : "border-white/10 text-slate-400 hover:bg-white/5"
                                                     )}
                                                 >
-                                                    {layout}
+                                                    {filter.replace(/([A-Z])/g, ' $1').trim()}
                                                 </button>
                                             ))}
                                         </div>
+                                        <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Filter</button>
                                     </div>
                                 )}
 
-                                {/* Transform Controls */}
-                                {collageImages.length >= 2 && collageTransforms[selectedSlot] && (
-                                    <div className="border-t border-white/10 pt-4 space-y-3">
-                                        <div className="flex justify-between items-center">
-                                            <label className="text-xs font-bold text-teal-400">Edit Image #{selectedSlot + 1}</label>
+                                {activeTool === "social-filters" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Trendy social media filters.</p>
+                                        <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
+                                            {(['clarendon', 'gingham', 'juno', 'lark', 'ludwig', 'valencia', 'moon', 'reyes', 'slumber', 'crema', 'aden', 'perpetua'] as const).map((filter) => (
+                                                <button
+                                                    key={filter}
+                                                    onClick={() => setSelectedFilter(filter)}
+                                                    className={clsx(
+                                                        "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
+                                                        selectedFilter === filter
+                                                            ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                            : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                    )}
+                                                >
+                                                    {filter}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <button onClick={handleApplyFilter} className="w-full btn-primary">Apply</button>
+                                    </div>
+                                )}
+
+                                {activeTool === "adjust" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Adjust brightness, contrast, and saturation.</p>
+                                        <div className="space-y-6">
+                                            <Slider
+                                                label="Brightness"
+                                                valueDisplay={`${brightness}%`}
+                                                min={0}
+                                                max={200}
+                                                value={brightness}
+                                                onChange={(e) => setBrightness(parseInt(e.target.value))}
+                                            />
+                                            <Slider
+                                                label="Contrast"
+                                                valueDisplay={`${contrast}%`}
+                                                min={0}
+                                                max={200}
+                                                value={contrast}
+                                                onChange={(e) => setContrast(parseInt(e.target.value))}
+                                            />
+                                            <Slider
+                                                label="Saturation"
+                                                valueDisplay={`${saturation}%`}
+                                                min={0}
+                                                max={200}
+                                                value={saturation}
+                                                onChange={(e) => setSaturation(parseInt(e.target.value))}
+                                            />
+                                        </div>
+                                        <button onClick={handleApplyAdjustments} className="w-full btn-primary">
+                                            <Sliders className="h-4 w-4" />
+                                            Apply
+                                        </button>
+                                    </div>
+                                )}
+
+                                {activeTool === "transform" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Rotate and flip your image.</p>
+
+                                        {/* Custom Rotation Slider */}
+                                        <div className="pt-4 border-t border-white/10 mb-4">
+                                            <Slider
+                                                label="Custom Rotation"
+                                                valueDisplay={`${rotation}°`}
+                                                min={-180}
+                                                max={180}
+                                                value={rotation}
+                                                onChange={(e) => setRotation(parseInt(e.target.value))}
+                                            />
+                                        </div>
+                                        {rotation !== 0 && (
                                             <button
-                                                onClick={() => {
-                                                    const newT = [...collageTransforms];
-                                                    newT[selectedSlot] = { zoom: 1, panX: 0, panY: 0 };
-                                                    setCollageTransforms(newT);
-                                                }}
-                                                className="text-[10px] text-slate-400 hover:text-white"
+                                                onClick={() => handleRotate(rotation)}
+                                                className="w-full btn-primary mt-2"
                                             >
-                                                Reset
+                                                <RotateCw className="h-4 w-4" />
+                                                Apply
+                                            </button>
+                                        )}
+
+                                        <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-4">
+                                            <button onClick={() => handleRotate(-90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                                <RotateCcw className="h-4 w-4" />
+                                                <span className="text-xs">Left 90°</span>
+                                            </button>
+                                            <button onClick={() => handleRotate(90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                                <RotateCw className="h-4 w-4" />
+                                                <span className="text-xs">Right 90°</span>
+                                            </button>
+                                            <button onClick={() => handleFlip('horizontal')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                                <FlipHorizontal className="h-4 w-4" />
+                                                <span className="text-xs">Flip H</span>
+                                            </button>
+                                            <button onClick={() => handleFlip('vertical')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                                <FlipVertical className="h-4 w-4" />
+                                                <span className="text-xs">Flip V</span>
                                             </button>
                                         </div>
-
-                                        {/* Zoom */}
-                                        <div className="mb-4">
-                                            <Slider
-                                                label="Zoom"
-                                                valueDisplay={`${collageTransforms[selectedSlot].zoom.toFixed(1)}x`}
-                                                min={0.5}
-                                                max={3}
-                                                step={0.1}
-                                                value={collageTransforms[selectedSlot].zoom}
-                                                onChange={(e) => {
-                                                    const newT = [...collageTransforms];
-                                                    newT[selectedSlot] = { ...newT[selectedSlot], zoom: parseFloat(e.target.value) };
-                                                    setCollageTransforms(newT);
-                                                }}
-                                            />
-                                        </div>
-
-                                        {/* Pan X */}
-                                        <div className="mb-4">
-                                            <Slider
-                                                label="Pan Horizontal"
-                                                min={-0.5}
-                                                max={0.5}
-                                                step={0.05}
-                                                value={collageTransforms[selectedSlot].panX}
-                                                onChange={(e) => {
-                                                    const newT = [...collageTransforms];
-                                                    newT[selectedSlot] = { ...newT[selectedSlot], panX: parseFloat(e.target.value) };
-                                                    setCollageTransforms(newT);
-                                                }}
-                                            />
-                                        </div>
-
-                                        {/* Pan Y */}
-                                        <div className="mb-4">
-                                            <Slider
-                                                label="Pan Vertical"
-                                                min={-0.5}
-                                                max={0.5}
-                                                step={0.05}
-                                                value={collageTransforms[selectedSlot].panY}
-                                                onChange={(e) => {
-                                                    const newT = [...collageTransforms];
-                                                    newT[selectedSlot] = { ...newT[selectedSlot], panY: parseFloat(e.target.value) };
-                                                    setCollageTransforms(newT);
-                                                }}
-                                            />
-                                        </div>
                                     </div>
                                 )}
 
-                                {/* Actions */}
-                                {collageImages.length >= 2 && (
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={() => setCollageImages(prev => [...prev].sort(() => Math.random() - 0.5))}
-                                            className="flex-1 btn-secondary flex items-center justify-center gap-2"
-                                        >
-                                            <Shuffle className="h-4 w-4" /> Shuffle
+                                {activeTool === "blur" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Apply blur or sharpen effect.</p>
+                                        <div>
+                                            <Slider
+                                                label="Blur Amount"
+                                                valueDisplay={`${blurAmount}px`}
+                                                min={0}
+                                                max={20}
+                                                value={blurAmount}
+                                                onChange={(e) => setBlurAmount(parseInt(e.target.value))}
+                                            />
+                                        </div>
+                                        <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">
+                                            <Droplets className="h-4 w-4" />
+                                            Apply
                                         </button>
-                                        <button
-                                            onClick={() => {
-                                                if (previewSrc) {
-                                                    pushState({ ...imageState!, processedSrc: previewSrc });
-                                                    setActiveTool(null);
-                                                    setCollageImages([]);
-                                                    setActiveLayout(null);
-                                                    setPreviewSrc(null);
-                                                }
-                                            }}
-                                            disabled={!previewSrc}
-                                            className="flex-1 btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
-                                        >
-                                            <Check className="h-4 w-4" /> Apply
+                                        <div className="border-t border-white/10 pt-4">
+                                            <Slider
+                                                label="Sharpen Amount"
+                                                valueDisplay={`${sharpenAmount}%`}
+                                                min={0}
+                                                max={100}
+                                                value={sharpenAmount}
+                                                onChange={(e) => setSharpenAmount(parseInt(e.target.value))}
+                                            />
+                                        </div>
+                                        <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">
+                                            <Zap className="h-4 w-4" />
+                                            Apply
                                         </button>
                                     </div>
                                 )}
-                            </div>
-                        )}
 
-                        {activeTool === "draw" && (
-                            <div className="space-y-4">
-                                <p className="text-xs text-slate-400">Draw on your image with pen, highlighter, or eraser.</p>
-
-                                {/* Drawing Mode Selection */}
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-2">Tool</label>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        <button
-                                            onClick={() => setDrawingMode('pen')}
-                                            className={clsx(
-                                                "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                                drawingMode === 'pen' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                            )}
-                                        >
-                                            <Pencil className="h-3 w-3" /> Pen
-                                        </button>
-                                        <button
-                                            onClick={() => setDrawingMode('highlighter')}
-                                            className={clsx(
-                                                "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                                drawingMode === 'highlighter' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                            )}
-                                        >
-                                            <Highlighter className="h-3 w-3" /> Highlight
-                                        </button>
-                                        <button
-                                            onClick={() => setDrawingMode('eraser')}
-                                            className={clsx(
-                                                "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                                drawingMode === 'eraser' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                            )}
-                                        >
-                                            <Eraser className="h-3 w-3" /> Eraser
-                                        </button>
+                                {activeTool === "redeye" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Click the button to automatically detect and fix red-eye in the center area of the image.</p>
+                                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+                                            <p className="text-xs text-yellow-400">Note: This is a simplified fix that targets the upper-center area where faces typically appear.</p>
+                                        </div>
+                                        <button onClick={handleRedEyeFix} className="w-full btn-primary">Fix Red-eye</button>
                                     </div>
-                                </div>
+                                )}
 
-                                {/* Color Picker */}
-                                {drawingMode !== 'eraser' && (
-                                    <div>
-                                        <label className="text-xs text-slate-400 block mb-2">Color</label>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="color"
-                                                value={brushColor}
-                                                onChange={(e) => setBrushColor(e.target.value)}
-                                                className="w-10 h-10 rounded-lg border border-white/20 cursor-pointer bg-transparent"
-                                            />
-                                            <div className="flex gap-1">
-                                                {['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#000000'].map(color => (
+                                {activeTool === "collage" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Combine 2-5 images into a collage.</p>
+
+                                        {/* Image List */}
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {collageImages.map((img, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    onClick={() => setSelectedSlot(idx)}
+                                                    className={clsx(
+                                                        "relative aspect-square rounded-lg overflow-hidden border cursor-pointer transition-all",
+                                                        selectedSlot === idx ? "border-teal-400 ring-2 ring-teal-500/50" : "border-white/20 hover:border-white/50"
+                                                    )}
+                                                >
+                                                    <img src={img} className="w-full h-full object-cover" />
                                                     <button
-                                                        key={color}
-                                                        onClick={() => setBrushColor(color)}
-                                                        className={clsx(
-                                                            "w-6 h-6 rounded-full border-2 transition-transform hover:scale-110",
-                                                            brushColor === color ? "border-white" : "border-white/20"
-                                                        )}
-                                                        style={{ backgroundColor: color }}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setCollageImages(prev => prev.filter((_, i) => i !== idx));
+                                                            setCollageTransforms(prev => prev.filter((_, i) => i !== idx));
+                                                            if (selectedSlot >= collageImages.length - 1) setSelectedSlot(Math.max(0, collageImages.length - 2));
+                                                        }}
+                                                        className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    >
+                                                        <X className="h-3 w-3" />
+                                                    </button>
+                                                    <div className="absolute bottom-0 left-0 bg-black/50 text-[10px] text-white px-1.5 py-0.5 rounded-tr">
+                                                        #{idx + 1}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {collageImages.length < 5 && (
+                                                <div {...getCollageProps()} className="aspect-square border border-dashed border-white/20 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
+                                                    <input {...getCollageInputProps()} />
+                                                    <Plus className="h-6 w-6 text-slate-500" />
+                                                    <span className="text-[10px] text-slate-500 mt-1">Add Img</span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Layout Selector */}
+                                        {collageImages.length >= 2 && (
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-2">Select Layout</label>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {AVAILABLE_LAYOUTS[collageImages.length]?.map(layout => (
+                                                        <button
+                                                            key={layout}
+                                                            onClick={() => setActiveLayout(layout)}
+                                                            className={clsx(
+                                                                "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
+                                                                activeLayout === layout
+                                                                    ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                                    : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                            )}
+                                                        >
+                                                            {layout}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Transform Controls */}
+                                        {collageImages.length >= 2 && collageTransforms[selectedSlot] && (
+                                            <div className="border-t border-white/10 pt-4 space-y-3">
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-xs font-bold text-teal-400">Edit Image #{selectedSlot + 1}</label>
+                                                    <button
+                                                        onClick={() => {
+                                                            const newT = [...collageTransforms];
+                                                            newT[selectedSlot] = { zoom: 1, panX: 0, panY: 0 };
+                                                            setCollageTransforms(newT);
+                                                        }}
+                                                        className="text-[10px] text-slate-400 hover:text-white"
+                                                    >
+                                                        Reset
+                                                    </button>
+                                                </div>
+
+                                                {/* Zoom */}
+                                                <div className="mb-4">
+                                                    <Slider
+                                                        label="Zoom"
+                                                        valueDisplay={`${collageTransforms[selectedSlot].zoom.toFixed(1)}x`}
+                                                        min={0.5}
+                                                        max={3}
+                                                        step={0.1}
+                                                        value={collageTransforms[selectedSlot].zoom}
+                                                        onChange={(e) => {
+                                                            const newT = [...collageTransforms];
+                                                            newT[selectedSlot] = { ...newT[selectedSlot], zoom: parseFloat(e.target.value) };
+                                                            setCollageTransforms(newT);
+                                                        }}
                                                     />
-                                                ))}
+                                                </div>
+
+                                                {/* Pan X */}
+                                                <div className="mb-4">
+                                                    <Slider
+                                                        label="Pan Horizontal"
+                                                        min={-0.5}
+                                                        max={0.5}
+                                                        step={0.05}
+                                                        value={collageTransforms[selectedSlot].panX}
+                                                        onChange={(e) => {
+                                                            const newT = [...collageTransforms];
+                                                            newT[selectedSlot] = { ...newT[selectedSlot], panX: parseFloat(e.target.value) };
+                                                            setCollageTransforms(newT);
+                                                        }}
+                                                    />
+                                                </div>
+
+                                                {/* Pan Y */}
+                                                <div className="mb-4">
+                                                    <Slider
+                                                        label="Pan Vertical"
+                                                        min={-0.5}
+                                                        max={0.5}
+                                                        step={0.05}
+                                                        value={collageTransforms[selectedSlot].panY}
+                                                        onChange={(e) => {
+                                                            const newT = [...collageTransforms];
+                                                            newT[selectedSlot] = { ...newT[selectedSlot], panY: parseFloat(e.target.value) };
+                                                            setCollageTransforms(newT);
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Actions */}
+                                        {collageImages.length >= 2 && (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setCollageImages(prev => [...prev].sort(() => Math.random() - 0.5))}
+                                                    className="flex-1 btn-secondary flex items-center justify-center gap-2"
+                                                >
+                                                    <Shuffle className="h-4 w-4" /> Shuffle
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        if (previewSrc) {
+                                                            pushState({ ...imageState!, processedSrc: previewSrc });
+                                                            setActiveTool(null);
+                                                            setCollageImages([]);
+                                                            setActiveLayout(null);
+                                                            setPreviewSrc(null);
+                                                        }
+                                                    }}
+                                                    disabled={!previewSrc}
+                                                    className="flex-1 btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
+                                                >
+                                                    <Check className="h-4 w-4" /> Apply
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {activeTool === "draw" && (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-slate-400">Draw on your image with pen, highlighter, or eraser.</p>
+
+                                        {/* Drawing Mode Selection */}
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-2">Tool</label>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <button
+                                                    onClick={() => setDrawingMode('pen')}
+                                                    className={clsx(
+                                                        "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                        drawingMode === 'pen' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                    )}
+                                                >
+                                                    <Pencil className="h-3 w-3" /> Pen
+                                                </button>
+                                                <button
+                                                    onClick={() => setDrawingMode('highlighter')}
+                                                    className={clsx(
+                                                        "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                        drawingMode === 'highlighter' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                    )}
+                                                >
+                                                    <Highlighter className="h-3 w-3" /> Highlight
+                                                </button>
+                                                <button
+                                                    onClick={() => setDrawingMode('eraser')}
+                                                    className={clsx(
+                                                        "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                        drawingMode === 'eraser' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                    )}
+                                                >
+                                                    <Eraser className="h-3 w-3" /> Eraser
+                                                </button>
                                             </div>
                                         </div>
+
+                                        {/* Color Picker */}
+                                        {drawingMode !== 'eraser' && (
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-2">Color</label>
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="color"
+                                                        value={brushColor}
+                                                        onChange={(e) => setBrushColor(e.target.value)}
+                                                        className="w-10 h-10 rounded-lg border border-white/20 cursor-pointer bg-transparent"
+                                                    />
+                                                    <div className="flex gap-1">
+                                                        {['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#000000'].map(color => (
+                                                            <button
+                                                                key={color}
+                                                                onClick={() => setBrushColor(color)}
+                                                                className={clsx(
+                                                                    "w-6 h-6 rounded-full border-2 transition-transform hover:scale-110",
+                                                                    brushColor === color ? "border-white" : "border-white/20"
+                                                                )}
+                                                                style={{ backgroundColor: color }}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Brush Size */}
+                                        <div>
+                                            <Slider
+                                                label="Brush Size"
+                                                valueDisplay={`${brushSize}px`}
+                                                min={1}
+                                                max={30}
+                                                value={brushSize}
+                                                onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                                            />
+                                        </div>
+
+                                        {/* Highlighter Opacity - Only show for highlighter */}
+                                        {drawingMode === 'highlighter' && (
+                                            <div>
+                                                <Slider
+                                                    label="Opacity"
+                                                    valueDisplay={`${Math.round(highlighterOpacity * 100)}%`}
+                                                    min={10}
+                                                    max={100}
+                                                    step={5}
+                                                    value={highlighterOpacity * 100}
+                                                    onChange={(e) => setHighlighterOpacity(parseInt(e.target.value) / 100)}
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* Action Buttons */}
+                                        <div className="flex gap-2">
+                                            <button onClick={clearDrawing} className="flex-1 btn-secondary">Clear</button>
+                                            <button onClick={applyDrawing} className="flex-1 btn-primary">Apply Drawing</button>
+                                        </div>
                                     </div>
                                 )}
-
-                                {/* Brush Size */}
-                                <div>
-                                    <Slider
-                                        label="Brush Size"
-                                        valueDisplay={`${brushSize}px`}
-                                        min={1}
-                                        max={30}
-                                        value={brushSize}
-                                        onChange={(e) => setBrushSize(parseInt(e.target.value))}
-                                    />
-                                </div>
-
-                                {/* Highlighter Opacity - Only show for highlighter */}
-                                {drawingMode === 'highlighter' && (
-                                    <div>
-                                        <Slider
-                                            label="Opacity"
-                                            valueDisplay={`${Math.round(highlighterOpacity * 100)}%`}
-                                            min={10}
-                                            max={100}
-                                            step={5}
-                                            value={highlighterOpacity * 100}
-                                            onChange={(e) => setHighlighterOpacity(parseInt(e.target.value) / 100)}
-                                        />
-                                    </div>
-                                )}
-
-                                {/* Action Buttons */}
-                                <div className="flex gap-2">
-                                    <button onClick={clearDrawing} className="flex-1 btn-secondary">Clear</button>
-                                    <button onClick={applyDrawing} className="flex-1 btn-primary">Apply Drawing</button>
-                                </div>
-                            </div>
+                            </>
                         )}
                     </aside>
                 )

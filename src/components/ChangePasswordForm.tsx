@@ -34,7 +34,7 @@ export default function ChangePasswordForm() {
                             </label>
                             <input
                                 id="password"
-                                name="newPassword"
+                                name="password"
                                 type="password"
                                 required
                                 minLength={6}
@@ -42,12 +42,26 @@ export default function ChangePasswordForm() {
                                 placeholder="Enter secure password"
                             />
                         </div>
+                        <div className="relative group">
+                            <label htmlFor="confirmPassword" className="block text-xs font-medium text-teal-300 uppercase tracking-wider mb-2">
+                                Confirm Password
+                            </label>
+                            <input
+                                id="confirmPassword"
+                                name="confirmPassword"
+                                type="password"
+                                required
+                                minLength={6}
+                                className="block w-full rounded-xl border border-white/10 bg-white/5 py-4 px-4 text-white placeholder-gray-500 focus:border-teal-500 focus:bg-white/10 focus:ring-1 focus:ring-teal-500 sm:text-sm transition-all outline-none"
+                                placeholder="Confirm password"
+                            />
+                        </div>
                     </div>
 
                     {state?.message && (
                         <div className={`rounded-xl p-4 text-sm font-medium border ${state.message.includes("success")
-                                ? "bg-teal-500/10 text-teal-300 border-teal-500/20"
-                                : "bg-red-500/10 text-red-300 border-red-500/20"
+                            ? "bg-teal-500/10 text-teal-300 border-teal-500/20"
+                            : "bg-red-500/10 text-red-300 border-red-500/20"
                             }`}>
                             {state.message}
                         </div>

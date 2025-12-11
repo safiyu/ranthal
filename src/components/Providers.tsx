@@ -5,6 +5,8 @@ import { ToastProvider } from "./Toast";
 import { EditorProvider } from "@/context/EditorContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 
+import { Session } from "next-auth";
+
 export function Providers({ children }: { children: React.ReactNode }) {
     return (
         <SessionProvider>

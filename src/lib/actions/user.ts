@@ -45,14 +45,21 @@ export async function updatePassword(prevState: any, formData: FormData) {
             await signIn("credentials", {
                 email: session.user.email,
                 password: password,
-                redirect: false
+                redirectTo: "/editor" // Redirects to editor after successful signin (and cookie update)
             });
         }
-
     } catch (error) {
+        // Must re-throw redirect error to allow Next.js to handle it
+        // Check if it's a redirect error (error.digest starts with NEXT_REDIRECT usually)
+        if ((error as any)?.digest?.toString().startsWith('NEXT_REDIRECT')) {
+            throw error;
+        }
+
+        // Handle AuthError specifically if needed, but for now generic logging
         console.error("Failed to update password:", error);
         return { message: "Failed to update password." };
     }
 
+    // Fallback if signIn didn't redirect (unlikely)
     redirect("/editor");
 }

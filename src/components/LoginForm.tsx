@@ -1,13 +1,29 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { authenticate } from "@/actions/auth-actions";
 import Link from "next/link";
 import { AlertCircle } from "lucide-react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useToast } from "@/components/Toast";
 
 export default function LoginForm() {
     const [errorMessage, dispatch] = useActionState(authenticate, undefined);
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const { showToast } = useToast();
+
+    useEffect(() => {
+        if (searchParams.get("registered") === "true") {
+            showToast("Account created! Please wait for admin approval.", "success");
+            router.replace("/login"); // Clean up URL
+        }
+
+        if ((errorMessage as any)?.success) {
+            window.location.href = "/dashboard";
+        }
+    }, [searchParams, showToast, router, errorMessage]);
 
     return (
         <div className="flex min-h-[calc(100vh-64px)] items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -56,7 +72,7 @@ export default function LoginForm() {
                         </div>
                     </div>
 
-                    {errorMessage && (
+                    {errorMessage && typeof errorMessage === 'string' && (
                         <div className="flex items-center gap-2 text-sm text-red-400">
                             <AlertCircle className="h-4 w-4" />
                             <p>{errorMessage}</p>

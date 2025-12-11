@@ -33,7 +33,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     const user = await getUser(email);
                     if (!user) return null;
                     const passwordsMatch = await comparePassword(password, user.passwordHash);
-                    if (passwordsMatch) return user;
+                    if (passwordsMatch) {
+                        if (!user.approved) {
+                            throw new Error("User not approved");
+                        }
+                        return user;
+                    }
                 }
 
                 console.log("Invalid credentials");

@@ -7,8 +7,16 @@ export const users = sqliteTable("users", {
     passwordHash: text("password_hash").notNull(),
     name: text("name"),
     role: text("role").$type<"admin" | "user">().notNull().default("user"),
+    approved: integer("approved", { mode: "boolean" }).notNull().default(false),
     isPasswordChanged: integer("is_password_changed", { mode: "boolean" }).notNull().default(false),
     createdAt: integer("created_at", { mode: "timestamp" }).default(new Date()),
+});
+
+export const loginAttempts = sqliteTable("login_attempts", {
+    ip: text("ip").primaryKey(),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttempt: integer("last_attempt", { mode: "timestamp" }).default(new Date()),
+    blockedUntil: integer("blocked_until", { mode: "timestamp" }),
 });
 
 export const edits = sqliteTable("edits", {
