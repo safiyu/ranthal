@@ -15,7 +15,7 @@ from torchvision import transforms
 import numpy as np
 import pytesseract
 
-app = FastAPI(title="Antigravity Backend API")
+app = FastAPI(title="Ranthal Backend API")
 
 # JWT Configuration
 JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")

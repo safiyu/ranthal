@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   app:
-    build: .
+    image: safiyu/ranthal:latest
     ports:
       - "3000:3000"
     environment:
@@ -10,3 +10,4 @@ services:
     volumes:
       - ./sqlite.db:/app/sqlite.db
       - ./public/uploads:/app/public/uploads
+    restart: unless-stopped

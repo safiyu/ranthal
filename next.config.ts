@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   // Required for SharedArrayBuffer
   async headers() {
     return [
@@ -19,7 +20,7 @@ const nextConfig: NextConfig = {
     },
   },
   // Mark native modules as external for server-side
-  serverExternalPackages: ['sharp', 'onnxruntime-node', '@imgly/background-removal-node'],
+  serverExternalPackages: ['sharp', 'onnxruntime-node', '@imgly/background-removal-node', 'better-sqlite3'],
 };
 
 export default nextConfig;
