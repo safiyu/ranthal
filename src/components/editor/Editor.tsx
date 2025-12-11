@@ -54,7 +54,6 @@ import { removeBg, extractText, compressImage, cancelBgRemoval, cancelOcr } from
 import { createIDCard } from "@/lib/id-card-utils";
 import { createCollage, AVAILABLE_LAYOUTS, type LayoutType, type CollageTransform } from "@/lib/collage-utils";
 import getCroppedImg from "@/lib/crop-utils";
-import { useHistory } from "@/hooks/useHistory";
 import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, type FilterName } from "@/lib/image-effects";
 import { useToast } from "@/components/Toast";
 import { jsPDF } from "jspdf";
@@ -63,12 +62,7 @@ import EXIF from "exif-js";
 type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "social-filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand" | "collage";
 type DrawingMode = "pen" | "highlighter" | "eraser";
 
-type ImageState = {
-    src: string;
-    processedSrc: string | null;
-    collageImages?: string[]; // Store for collage builder
-    activeLayout?: string;
-};
+
 
 // Helper to convert data URL to Blob
 const dataURLtoBlob = (dataUrl: string): Blob => {
@@ -96,9 +90,11 @@ const imageToBlob = async (imageSrc: string): Promise<Blob> => {
     return await response.blob();
 };
 
+import { useEditorState } from "@/context/EditorContext";
+
 export function Editor() {
     const { showToast } = useToast();
-    const { state: imageState, pushState, undo, redo, canUndo, canRedo } = useHistory<ImageState | null>(null);
+    const { imageState, pushState, undo, redo, canUndo, canRedo } = useEditorState();
     const [activeTool, setActiveTool] = useState<Tool | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
 
