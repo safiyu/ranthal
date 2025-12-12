@@ -7,7 +7,13 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
+      - DB_PATH=/app/db/sqlite.db
+      - AUTH_TRUST_HOST=true
+      - PUID=1000
+      - PGID=1000
+      - AUTH_URL=https://ranthal.safiyu.ovh
+      - NEXT_PUBLIC_APP_URL=https://ranthal.safiyu.ovh
     volumes:
-      - ./sqlite.db:/app/sqlite.db
+      - ./db:/app/db
       - ./public/uploads:/app/public/uploads
     restart: unless-stopped

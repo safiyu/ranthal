@@ -1,9 +1,9 @@
 // Image Effects Utility Functions
 
-type FilterName = 'grayscale' | 'sepia' | 'vintage' | 'warm' | 'cool' | 'highContrast' | 'noir' | 'fade' | 'kodak' | 'technicolor' | 'polaroid' | 'dramatic' | 'golden' | 'cyberpunk' | 'clarendon' | 'gingham' | 'juno' | 'lark' | 'ludwig' | 'valencia' | 'moon' | 'reyes' | 'slumber' | 'crema' | 'aden' | 'perpetua';
+type FilterName = 'grayscale' | 'sepia' | 'vintage' | 'warm' | 'cool' | 'highContrast' | 'noir' | 'fade' | 'kodak' | 'technicolor' | 'polaroid' | 'dramatic' | 'golden' | 'cyberpunk' | 'clarendon' | 'gingham' | 'juno' | 'lark' | 'ludwig' | 'valencia' | 'moon' | 'reyes' | 'slumber' | 'crema' | 'aden' | 'perpetua' | 'oldCinema' | 'retro' | 'twilight' | 'sunset' | 'forest' | 'rust';
 
 // Preset filter definitions
-const FILTER_PRESETS: Record<FilterName, string> = {
+export const FILTER_PRESETS: Record<FilterName, string> = {
     grayscale: 'grayscale(100%)',
     sepia: 'sepia(100%)',
     vintage: 'sepia(50%) contrast(90%) brightness(90%)',
@@ -30,6 +30,12 @@ const FILTER_PRESETS: Record<FilterName, string> = {
     crema: 'sepia(50%) contrast(125%) saturate(90%) hue-rotate(-2deg)',
     aden: 'hue-rotate(-20deg) contrast(90%) saturate(85%) brightness(120%)',
     perpetua: 'contrast(110%) brightness(110%) saturate(110%)',
+    oldCinema: 'grayscale(90%) contrast(160%) brightness(85%) sepia(20%)',
+    retro: 'sepia(40%) saturate(140%) contrast(110%) brightness(95%)',
+    twilight: 'brightness(90%) contrast(120%) saturate(120%) hue-rotate(200deg)',
+    sunset: 'sepia(30%) saturate(160%) hue-rotate(-10deg) contrast(110%)',
+    forest: 'sepia(20%) brightness(95%) contrast(110%) saturate(120%) hue-rotate(60deg)',
+    rust: 'sepia(50%) saturate(150%) contrast(130%) hue-rotate(-20deg)',
 };
 
 /**

@@ -14,6 +14,9 @@ Ranthal is a powerful, AI-powered web-based image editor designed for speed and 
 - **ID Card Maker**: Create professional ID card layouts and A4 print-ready sheets easily.
 - **Collage Maker**: Create collages layouts and A4 print-ready easily.
 - **Privacy First**: Fast and secure processing.
+- **Large Image Support**: Uses IndexedDB for local storage, supporting high-resolution edits without quota limits.
+- **Mobile Friendly**: Full touch support for drawing and responsive tools (including specialized mobile toolbars).
+- **Admin Controls**: Secure user management with self-deletion protection and auto-approval visibility.
 
 ![Editor Interface](screenshots/editor.png)
 
@@ -52,8 +55,15 @@ docker run -p 3000:3000 \
          - "3000:3000"
        environment:
          - NODE_ENV=production
+         - DB_PATH=/app/db/sqlite.db
+         - AUTH_TRUST_HOST=true
+         - PUID=1000 # Customize your User ID
+         - PGID=1000 # Customize your Group ID
+         # URL Configuration (Available in v0.2.0+)
+         - AUTH_URL=https://yourdomain.com # Required for correct sign-out redirect
+         - NEXT_PUBLIC_APP_URL=https://yourdomain.com
        volumes:
-         - ./sqlite.db:/app/sqlite.db
+         - ./db:/app/db
          - ./public/uploads:/app/public/uploads
        restart: unless-stopped
    ```

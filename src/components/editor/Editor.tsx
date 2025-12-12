@@ -54,7 +54,7 @@ import { removeBg, extractText, compressImage, cancelBgRemoval, cancelOcr } from
 import { createIDCard } from "@/lib/id-card-utils";
 import { createCollage, AVAILABLE_LAYOUTS, type LayoutType, type CollageTransform } from "@/lib/collage-utils";
 import getCroppedImg from "@/lib/crop-utils";
-import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, type FilterName } from "@/lib/image-effects";
+import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, type FilterName, FILTER_PRESETS } from "@/lib/image-effects";
 import { useToast } from "@/components/Toast";
 import { jsPDF } from "jspdf";
 import EXIF from "exif-js";
@@ -161,70 +161,37 @@ export function Editor() {
     // Preview State (for real-time collage/adjustments before commit)
     const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
+    const currentImage = previewSrc || imageState?.processedSrc || imageState?.src;
+
+    // Cursor State
+    const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
+    const [showCursor, setShowCursor] = useState(false);
+    const [imageScale, setImageScale] = useState(1);
+
+    // Update image scale for cursor sizing
+    // Update image scale for cursor sizing
+    const updateImageScale = useCallback(() => {
+        if (imageRef.current) {
+            const { width } = imageRef.current.getBoundingClientRect();
+            const naturalWidth = imageRef.current.naturalWidth;
+            if (naturalWidth > 0) {
+                setImageScale(width / naturalWidth);
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        updateImageScale();
+        window.addEventListener('resize', updateImageScale);
+        return () => window.removeEventListener('resize', updateImageScale);
+    }, [viewZoom, currentImage, activeTool, updateImageScale]);
+
 
     // CSS Filter string for real-time preview
     const getPreviewFilter = () => {
-        if (activeTool === "filters") {
-            const filterPresets: Record<FilterName, string> = {
-                grayscale: 'grayscale(100%)',
-                sepia: 'sepia(100%)',
-                vintage: 'sepia(50%) contrast(90%) brightness(90%)',
-                warm: 'sepia(30%) saturate(120%) brightness(105%)',
-                cool: 'saturate(80%) hue-rotate(20deg) brightness(95%)',
-                highContrast: 'contrast(150%) saturate(110%)',
-                noir: 'grayscale(100%) contrast(120%) brightness(90%)',
-                fade: 'contrast(80%) brightness(110%) saturate(80%)',
-                kodak: 'sepia(20%) saturate(160%) contrast(110%) brightness(105%)',
-                technicolor: 'saturate(200%) contrast(130%) hue-rotate(-10deg)',
-                polaroid: 'contrast(110%) brightness(110%) grayscale(20%) sepia(20%)',
-                dramatic: 'contrast(140%) grayscale(30%) brightness(90%)',
-                golden: 'sepia(40%) saturate(150%) brightness(110%) contrast(110%)',
-                cyberpunk: 'hue-rotate(180deg) saturate(200%) contrast(130%)',
-                clarendon: 'sepia(10%) contrast(120%) brightness(125%) saturate(135%)',
-                gingham: 'sepia(10%) hue-rotate(-10deg) brightness(105%) contrast(110%) saturate(80%)',
-                juno: 'sepia(30%) contrast(115%) brightness(110%) saturate(140%) hue-rotate(-10deg)',
-                lark: 'contrast(90%) brightness(120%) saturate(110%)',
-                ludwig: 'sepia(10%) contrast(105%) brightness(105%) saturate(180%)',
-                valencia: 'sepia(25%) contrast(108%) brightness(108%)',
-                moon: 'grayscale(100%) brightness(110%) contrast(110%)',
-                reyes: 'sepia(22%) brightness(110%) contrast(85%) saturate(75%)',
-                slumber: 'sepia(35%) contrast(125%) saturate(125%)',
-                crema: 'sepia(50%) contrast(125%) saturate(90%) hue-rotate(-2deg)',
-                aden: 'hue-rotate(-20deg) contrast(90%) saturate(85%) brightness(120%)',
-                perpetua: 'contrast(110%) brightness(110%) saturate(110%)',
-            };
-            return filterPresets[selectedFilter];
-        }
-        if (activeTool === "social-filters") {
-            const filterPresets: Record<FilterName, string> = {
-                grayscale: 'grayscale(100%)', // Fallbacks/Common
-                sepia: 'sepia(100%)',
-                vintage: 'sepia(50%) contrast(90%) brightness(90%)',
-                warm: 'sepia(30%) saturate(120%) brightness(105%)',
-                cool: 'saturate(80%) hue-rotate(20deg) brightness(95%)',
-                highContrast: 'contrast(150%) saturate(110%)',
-                noir: 'grayscale(100%) contrast(120%) brightness(90%)',
-                fade: 'contrast(80%) brightness(110%) saturate(80%)',
-                kodak: 'sepia(20%) saturate(160%) contrast(110%) brightness(105%)',
-                technicolor: 'saturate(200%) contrast(130%) hue-rotate(-10deg)',
-                polaroid: 'contrast(110%) brightness(110%) grayscale(20%) sepia(20%)',
-                dramatic: 'contrast(140%) grayscale(30%) brightness(90%)',
-                golden: 'sepia(40%) saturate(150%) brightness(110%) contrast(110%)',
-                cyberpunk: 'hue-rotate(180deg) saturate(200%) contrast(130%)',
-                clarendon: 'sepia(10%) contrast(120%) brightness(125%) saturate(135%)',
-                gingham: 'sepia(10%) hue-rotate(-10deg) brightness(105%) contrast(110%) saturate(80%)',
-                juno: 'sepia(30%) contrast(115%) brightness(110%) saturate(140%) hue-rotate(-10deg)',
-                lark: 'contrast(90%) brightness(120%) saturate(110%)',
-                ludwig: 'sepia(10%) contrast(105%) brightness(105%) saturate(180%)',
-                valencia: 'sepia(25%) contrast(108%) brightness(108%)',
-                moon: 'grayscale(100%) brightness(110%) contrast(110%)',
-                reyes: 'sepia(22%) brightness(110%) contrast(85%) saturate(75%)',
-                slumber: 'sepia(35%) contrast(125%) saturate(125%)',
-                crema: 'sepia(50%) contrast(125%) saturate(90%) hue-rotate(-2deg)',
-                aden: 'hue-rotate(-20deg) contrast(90%) saturate(85%) brightness(120%)',
-                perpetua: 'contrast(110%) brightness(110%) saturate(110%)',
-            };
-            return filterPresets[selectedFilter];
+        if (activeTool === "filters" || activeTool === "social-filters") {
+            // Use imported presets or fallback
+            return FILTER_PRESETS[selectedFilter] || "";
         }
         if (activeTool === "adjust") {
             return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`;
@@ -287,7 +254,7 @@ export function Editor() {
         maxFiles: 5
     });
 
-    const currentImage = previewSrc || imageState?.processedSrc || imageState?.src;
+
 
     // Auto-generate collage preview
     useEffect(() => {
@@ -837,7 +804,7 @@ export function Editor() {
     };
 
     // Drawing handlers
-    const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
@@ -845,8 +812,20 @@ export function Editor() {
 
         setIsDrawing(true);
         const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        let clientX, clientY;
+        if ('touches' in e) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        const x = (clientX - rect.left) * scaleX;
+        const y = (clientY - rect.top) * scaleY;
 
         ctx.beginPath();
         ctx.moveTo(x, y);
@@ -881,7 +860,7 @@ export function Editor() {
         }
     };
 
-    const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
         if (!isDrawing) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -889,8 +868,20 @@ export function Editor() {
         if (!ctx) return;
 
         const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        let clientX, clientY;
+        if ('touches' in e) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        const x = (clientX - rect.left) * scaleX;
+        const y = (clientY - rect.top) * scaleY;
 
         if (drawingMode === 'eraser') {
             ctx.lineTo(x, y);
@@ -1021,15 +1012,14 @@ export function Editor() {
     };
 
     return (
-        <div className="flex h-[calc(100vh-64px)] overflow-hidden">
-            {/* Sidebar (Left) */}
+        <div className="flex flex-col lg:flex-row h-full lg:h-[calc(100vh-64px)] overflow-y-auto lg:overflow-hidden pt-20 lg:pt-0">
             {/* Sidebar (Left) */}
             {imageState && (
-                <aside className="w-20 xl:w-72 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl flex flex-col items-center xl:items-stretch py-6 z-30 shadow-2xl overflow-hidden h-[calc(100vh-8rem)]">
-                    <div className="flex-1 px-3 xl:px-6 overflow-y-auto scrollbar-hide space-y-6">
+                <aside className="w-full lg:w-20 xl:w-72 m-4 lg:m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl flex flex-row lg:flex-col items-center lg:items-stretch py-4 lg:py-6 z-30 shadow-2xl overflow-x-auto lg:overflow-y-auto scrollbar-hide lg:h-[calc(100vh-8rem)] shrink-0 order-2 lg:order-1 gap-4 lg:gap-0 px-4 lg:px-0">
+                    <div className="flex flex-row lg:flex-col lg:flex-1 px-0 lg:px-3 xl:px-6 overflow-x-visible lg:overflow-y-auto scrollbar-hide space-x-4 lg:space-x-0 lg:space-y-6">
 
                         {/* Group: Essentials */}
-                        <div className="space-y-2">
+                        <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Essentials</h3>
                             <ToolButton active={activeTool === "crop"} onClick={() => setActiveTool("crop")} icon={<CropIcon />} label="Crop & Resize" disabled={!imageState} />
                             <ToolButton active={activeTool === "hand"} onClick={() => setActiveTool("hand")} icon={<Hand />} label="Pan Tool" disabled={!imageState} />
@@ -1037,7 +1027,7 @@ export function Editor() {
                         </div>
 
                         {/* Group: Adjustments */}
-                        <div className="space-y-2">
+                        <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Adjustments</h3>
                             <ToolButton active={activeTool === "filters"} onClick={() => setActiveTool("filters")} icon={<Palette />} label="Filters" disabled={!imageState} />
                             <ToolButton active={activeTool === "adjust"} onClick={() => setActiveTool("adjust")} icon={<SlidersHorizontal />} label="Tune Image" disabled={!imageState} />
@@ -1046,13 +1036,13 @@ export function Editor() {
                         </div>
 
                         {/* Group: Social */}
-                        <div className="space-y-2">
+                        <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Social</h3>
                             <ToolButton active={activeTool === "social-filters"} onClick={() => setActiveTool("social-filters")} icon={<Filter />} label="Insta Filters" disabled={!imageState} />
                         </div>
 
                         {/* Group: Smart Actions */}
-                        <div className="space-y-2">
+                        <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Smart Tools</h3>
                             <ToolButton active={activeTool === "bg-remove"} onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }} icon={<Layers />} label="Remove BG" disabled={!imageState} />
                             <ToolButton active={activeTool === "collage"} onClick={() => {
@@ -1067,13 +1057,13 @@ export function Editor() {
                         </div>
 
                         {/* Group: Creative */}
-                        <div className="space-y-2">
+                        <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Creative</h3>
                             <ToolButton active={activeTool === "draw"} onClick={() => setActiveTool("draw")} icon={<Pencil />} label="Draw" disabled={!imageState} />
                         </div>
 
                         {/* Group: Utilities */}
-                        <div className="space-y-2">
+                        <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Export</h3>
                             <ToolButton active={activeTool === "convert"} onClick={() => setActiveTool("convert")} icon={<FileType />} label="Format Convert" disabled={!imageState} />
                             <ToolButton active={activeTool === "compress"} onClick={() => setActiveTool("compress")} icon={<Minimize2 />} label="Compress" disabled={!imageState} />
@@ -1085,19 +1075,19 @@ export function Editor() {
             )}
 
             {/* Main Canvas Area */}
-            <main className="flex-1 relative overflow-hidden flex items-center justify-center p-8 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/30 backdrop-blur-sm shadow-inner h-[calc(100vh-8rem)]">
+            <main className="flex-1 relative overflow-hidden flex items-center justify-center p-4 lg:p-8 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/30 backdrop-blur-sm shadow-inner min-h-[50vh] lg:h-[calc(100vh-8rem)] order-1 lg:order-2">
 
                 {/* Top Toolbar (Undo/Redo/Zoom) */}
                 {imageState && (
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 z-40 bg-black/80 backdrop-blur-md rounded-full px-4 py-2 border border-white/10">
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 z-40 bg-black/80 backdrop-blur-md rounded-full px-4 py-2 border border-white/10 w-max max-w-[90%] overflow-x-auto">
                         <button onClick={undo} disabled={!canUndo} className="p-2 rounded-full hover:bg-white/10 text-white disabled:opacity-30 transition-colors" title="Undo">
                             <Undo className="h-4 w-4" />
                         </button>
-                        <div className="w-px h-4 bg-white/20" />
+                        <div className="w-px h-4 bg-white/20 shrink-0" />
                         <button onClick={redo} disabled={!canRedo} className="p-2 rounded-full hover:bg-white/10 text-white disabled:opacity-30 transition-colors" title="Redo">
                             <Redo className="h-4 w-4" />
                         </button>
-                        <div className="w-px h-4 bg-white/20" />
+                        <div className="w-px h-4 bg-white/20 shrink-0" />
                         <button onClick={() => setViewZoom(Math.max(25, viewZoom - 25))} disabled={viewZoom <= 25} className="p-2 rounded-full hover:bg-white/10 text-white disabled:opacity-30 transition-colors" title="Zoom Out">
                             <ZoomOut className="h-4 w-4" />
                         </button>
@@ -1112,7 +1102,7 @@ export function Editor() {
                     <div
                         {...getRootProps()}
                         className={clsx(
-                            "w-full max-w-xl aspect-video border-2 border-dashed rounded-3xl flex flex-col items-center justify-center cursor-pointer transition-all",
+                            "w-full max-w-xl aspect-video border-2 border-dashed rounded-3xl flex flex-col items-center justify-center cursor-pointer transition-all p-4 text-center",
                             isDragActive ? "border-white bg-white/10" : "border-white/10 hover:border-white/50 hover:bg-white/5"
                         )}
                     >
@@ -1204,6 +1194,7 @@ export function Editor() {
                                         ref={imageRef}
                                         src={currentImage || ""}
                                         alt="Work in progress"
+                                        onLoad={updateImageScale}
                                         className="max-w-[calc(100vw-8rem)] max-h-[calc(100vh-12rem)] object-contain rounded-lg"
                                         style={{
                                             filter: getPreviewFilter(),
@@ -1216,11 +1207,36 @@ export function Editor() {
                                                 ref={canvasRef}
                                                 width={imageRef.current?.naturalWidth || 800}
                                                 height={imageRef.current?.naturalHeight || 600}
-                                                className="absolute inset-0 cursor-crosshair w-full h-full"
+                                                className={clsx(
+                                                    "absolute inset-0 w-full h-full",
+                                                    (activeTool === "draw" && showCursor) ? "cursor-none" : "",
+                                                    drawingMode === 'pen' && !showCursor && "cursor-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgc3R5bGU9ImZpbHRlcjogZHJvcC1zaGFkb3coMXB4IDFweCAxcHggYmxhY2spOyI+PHBhdGggZD0iTTEyIDE5bDctN2wzLTMgNyA3bC0zIDMiLz48cGF0aCBkPSJTE4IDEzIDEyIDE5Ii8+PHBhdGggZD0iTTIyIDIyIDEyIDIyIi8+PC9zdmc+')_0_24,pointer]",
+                                                    drawingMode === 'highlighter' && !showCursor && "cursor-text",
+                                                    drawingMode === 'eraser' && !showCursor && "cursor-cell"
+                                                )}
                                                 onMouseDown={startDrawing}
-                                                onMouseMove={draw}
+                                                onMouseMove={(e) => {
+                                                    setCursorPos({ x: e.clientX, y: e.clientY });
+                                                    draw(e);
+                                                }}
                                                 onMouseUp={stopDrawing}
-                                                onMouseLeave={stopDrawing}
+                                                onMouseLeave={(e) => {
+                                                    setShowCursor(false);
+                                                    stopDrawing();
+                                                }}
+                                                onMouseEnter={() => setShowCursor(true)}
+                                                onTouchStart={(e) => {
+                                                    //e.preventDefault(); // This might block scrolling if we are not careful, but needed for drawing
+                                                    startDrawing(e);
+                                                }}
+                                                onTouchMove={(e) => {
+                                                    //e.preventDefault();
+                                                    if (e.touches[0]) {
+                                                        setCursorPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+                                                        draw(e);
+                                                    }
+                                                }}
+                                                onTouchEnd={stopDrawing}
                                             />
                                             <canvas
                                                 ref={tempCanvasRef}
@@ -1264,34 +1280,36 @@ export function Editor() {
                 )}
 
                 {/* Action Buttons (Top Right) */}
-                <div className="absolute top-4 right-4 flex gap-2 z-40">
-                    <button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        className="w-10 h-10 flex items-center justify-center rounded-full bg-teal-500 text-white hover:bg-teal-600 transition-colors shadow-lg disabled:opacity-50"
-                        title="Save Project"
-                    >
-                        {isSaving ? <Wand2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
-                    </button>
-                    <button
-                        onClick={handleDownload}
-                        className="w-10 h-10 flex items-center justify-center rounded-full bg-white text-black hover:bg-slate-200 transition-colors shadow-lg"
-                        title="Download"
-                    >
-                        <Download className="h-5 w-5" />
-                    </button>
-                    <button
-                        onClick={() => {
-                            pushState(null);
-                            // Clear URL parameter when closing
-                            router.push('/editor');
-                        }}
-                        className="w-10 h-10 flex items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 backdrop-blur-md transition-colors shadow-lg"
-                        title="Close / Reset"
-                    >
-                        <X className="h-5 w-5" />
-                    </button>
-                </div>
+                {imageState && (
+                    <div className="absolute top-4 right-4 flex gap-2 z-40">
+                        <button
+                            onClick={handleSave}
+                            disabled={isSaving}
+                            className="w-10 h-10 flex items-center justify-center rounded-full bg-teal-500 text-white hover:bg-teal-600 transition-colors shadow-lg disabled:opacity-50"
+                            title="Save Project"
+                        >
+                            {isSaving ? <Wand2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+                        </button>
+                        <button
+                            onClick={handleDownload}
+                            className="w-10 h-10 flex items-center justify-center rounded-full bg-white text-black hover:bg-slate-200 transition-colors shadow-lg"
+                            title="Download"
+                        >
+                            <Download className="h-5 w-5" />
+                        </button>
+                        <button
+                            onClick={() => {
+                                pushState(null);
+                                // Clear URL parameter when closing
+                                router.push('/editor');
+                            }}
+                            className="w-10 h-10 flex items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 backdrop-blur-md transition-colors shadow-lg"
+                            title="Close / Reset"
+                        >
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
+                )}
             </main>
 
 
@@ -1299,7 +1317,7 @@ export function Editor() {
             {/* Properties Panel (Right side) - Always Visible if image loaded */}
             {
                 imageState && (
-                    <aside className="w-80 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl p-6 z-20 flex flex-col transition-all overflow-y-auto shadow-2xl animate-slide-in-right h-[calc(100vh-8rem)]">
+                    <aside className="w-full lg:w-80 m-4 lg:m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/80 backdrop-blur-xl p-6 z-20 flex flex-col transition-all overflow-y-auto shadow-2xl h-[400px] lg:h-[calc(100vh-8rem)] shrink-0 order-3">
                         {!activeTool ? (
                             <div className="flex-1 flex flex-col items-center justify-center text-center opacity-50">
                                 <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
@@ -1441,525 +1459,565 @@ export function Editor() {
                                     </div>
                                 )}
 
-                                {activeTool === "crop" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400 mb-2">Drag on the image to select crop area.</p>
-                                        <button onClick={handleCrop} className="w-full btn-primary">
-                                            <CropIcon className="h-4 w-4" />
-                                            Apply
-                                        </button>
-                                    </div>
-                                )}
-
-                                {activeTool === "convert" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400 mb-2">Convert image format.</p>
-                                        <div>
-                                            <label className="text-xs text-slate-400 block mb-2">Output Format</label>
-                                            <select
-                                                value={selectedFormat}
-                                                onChange={(e) => setSelectedFormat(e.target.value as "png" | "jpeg" | "webp" | "pdf")}
-                                                className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/50"
-                                            >
-                                                <option value="png">PNG</option>
-                                                <option value="jpeg">JPG</option>
-                                                <option value="webp">WebP</option>
-                                                <option value="pdf">PDF (Download)</option>
-                                            </select>
-                                        </div>
-                                        <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">
-                                            <Download className="h-4 w-4" />
-                                            Apply
-                                        </button>
-                                    </div>
-                                )}
-
-                                {activeTool === "ocr" && (
-                                    <div className="flex-1 flex flex-col min-h-0">
-                                        {isProcessing ? (
-                                            <div className="flex flex-col items-center justify-center py-8">
-                                                <Wand2 className="h-6 w-6 text-white animate-spin mb-2" />
-                                                <p className="text-xs text-slate-400">Extracting text...</p>
-                                            </div>
-                                        ) : (
-                                            <>
-                                                <textarea
-                                                    className="flex-1 w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:border-white/50 mb-4"
-                                                    value={extractedText}
-                                                    readOnly
-                                                    placeholder="Text will appear here..."
-                                                />
-                                                <button
-                                                    className="w-full btn-secondary flex items-center justify-center gap-2"
-                                                    onClick={() => { navigator.clipboard.writeText(extractedText) }}
-                                                    disabled={!extractedText}
-                                                >
-                                                    Copy to Clipboard
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
-                                )}
-
-                                {activeTool === "compress" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Reduce file size. Lower quality = smaller file.</p>
-                                        <div className="mb-4">
-                                            <Slider
-                                                label="Quality"
-                                                valueDisplay={`${compressionQuality}%`}
-                                                min={10}
-                                                max={100}
-                                                value={compressionQuality}
-                                                onChange={(e) => setCompressionQuality(parseInt(e.target.value))}
-                                            />
-                                            <p className="text-[10px] text-slate-500 mt-1">Lower quality = smaller file size</p>
-                                        </div>
-                                        <button onClick={handleCompress} className="w-full btn-primary">
-                                            <Minimize2 className="h-4 w-4" />
-                                            Apply
-                                        </button>
-                                    </div>
-                                )}
-
-                                {activeTool === "filters" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Apply preset image filters.</p>
-                                        <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
-                                            {(['grayscale', 'sepia', 'vintage', 'warm', 'cool', 'highContrast', 'noir', 'fade', 'kodak', 'technicolor', 'polaroid', 'dramatic', 'golden', 'cyberpunk'] as const).map((filter) => (
-                                                <button
-                                                    key={filter}
-                                                    onClick={() => setSelectedFilter(filter)}
-                                                    className={clsx(
-                                                        "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
-                                                        selectedFilter === filter
-                                                            ? "border-teal-400 bg-teal-500/20 text-teal-300"
-                                                            : "border-white/10 text-slate-400 hover:bg-white/5"
-                                                    )}
-                                                >
-                                                    {filter.replace(/([A-Z])/g, ' $1').trim()}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Filter</button>
-                                    </div>
-                                )}
-
-                                {activeTool === "social-filters" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Trendy social media filters.</p>
-                                        <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
-                                            {(['clarendon', 'gingham', 'juno', 'lark', 'ludwig', 'valencia', 'moon', 'reyes', 'slumber', 'crema', 'aden', 'perpetua'] as const).map((filter) => (
-                                                <button
-                                                    key={filter}
-                                                    onClick={() => setSelectedFilter(filter)}
-                                                    className={clsx(
-                                                        "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
-                                                        selectedFilter === filter
-                                                            ? "border-teal-400 bg-teal-500/20 text-teal-300"
-                                                            : "border-white/10 text-slate-400 hover:bg-white/5"
-                                                    )}
-                                                >
-                                                    {filter}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        <button onClick={handleApplyFilter} className="w-full btn-primary">Apply</button>
-                                    </div>
-                                )}
-
-                                {activeTool === "adjust" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Adjust brightness, contrast, and saturation.</p>
-                                        <div className="space-y-6">
-                                            <Slider
-                                                label="Brightness"
-                                                valueDisplay={`${brightness}%`}
-                                                min={0}
-                                                max={200}
-                                                value={brightness}
-                                                onChange={(e) => setBrightness(parseInt(e.target.value))}
-                                            />
-                                            <Slider
-                                                label="Contrast"
-                                                valueDisplay={`${contrast}%`}
-                                                min={0}
-                                                max={200}
-                                                value={contrast}
-                                                onChange={(e) => setContrast(parseInt(e.target.value))}
-                                            />
-                                            <Slider
-                                                label="Saturation"
-                                                valueDisplay={`${saturation}%`}
-                                                min={0}
-                                                max={200}
-                                                value={saturation}
-                                                onChange={(e) => setSaturation(parseInt(e.target.value))}
-                                            />
-                                        </div>
-                                        <button onClick={handleApplyAdjustments} className="w-full btn-primary">
-                                            <Sliders className="h-4 w-4" />
-                                            Apply
-                                        </button>
-                                    </div>
-                                )}
-
-                                {activeTool === "transform" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Rotate and flip your image.</p>
-
-                                        {/* Custom Rotation Slider */}
-                                        <div className="pt-4 border-t border-white/10 mb-4">
-                                            <Slider
-                                                label="Custom Rotation"
-                                                valueDisplay={`${rotation}°`}
-                                                min={-180}
-                                                max={180}
-                                                value={rotation}
-                                                onChange={(e) => setRotation(parseInt(e.target.value))}
-                                            />
-                                        </div>
-                                        {rotation !== 0 && (
-                                            <button
-                                                onClick={() => handleRotate(rotation)}
-                                                className="w-full btn-primary mt-2"
-                                            >
-                                                <RotateCw className="h-4 w-4" />
+                                {
+                                    activeTool === "crop" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400 mb-2">Drag on the image to select crop area.</p>
+                                            <button onClick={handleCrop} className="w-full btn-primary">
+                                                <CropIcon className="h-4 w-4" />
                                                 Apply
                                             </button>
-                                        )}
-
-                                        <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-4">
-                                            <button onClick={() => handleRotate(-90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                                <RotateCcw className="h-4 w-4" />
-                                                <span className="text-xs">Left 90°</span>
-                                            </button>
-                                            <button onClick={() => handleRotate(90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                                <RotateCw className="h-4 w-4" />
-                                                <span className="text-xs">Right 90°</span>
-                                            </button>
-                                            <button onClick={() => handleFlip('horizontal')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                                <FlipHorizontal className="h-4 w-4" />
-                                                <span className="text-xs">Flip H</span>
-                                            </button>
-                                            <button onClick={() => handleFlip('vertical')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
-                                                <FlipVertical className="h-4 w-4" />
-                                                <span className="text-xs">Flip V</span>
-                                            </button>
                                         </div>
-                                    </div>
-                                )}
+                                    )
+                                }
 
-                                {activeTool === "blur" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Apply blur or sharpen effect.</p>
-                                        <div>
-                                            <Slider
-                                                label="Blur Amount"
-                                                valueDisplay={`${blurAmount}px`}
-                                                min={0}
-                                                max={20}
-                                                value={blurAmount}
-                                                onChange={(e) => setBlurAmount(parseInt(e.target.value))}
-                                            />
-                                        </div>
-                                        <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">
-                                            <Droplets className="h-4 w-4" />
-                                            Apply
-                                        </button>
-                                        <div className="border-t border-white/10 pt-4">
-                                            <Slider
-                                                label="Sharpen Amount"
-                                                valueDisplay={`${sharpenAmount}%`}
-                                                min={0}
-                                                max={100}
-                                                value={sharpenAmount}
-                                                onChange={(e) => setSharpenAmount(parseInt(e.target.value))}
-                                            />
-                                        </div>
-                                        <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">
-                                            <Zap className="h-4 w-4" />
-                                            Apply
-                                        </button>
-                                    </div>
-                                )}
-
-                                {activeTool === "redeye" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Click the button to automatically detect and fix red-eye in the center area of the image.</p>
-                                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-                                            <p className="text-xs text-yellow-400">Note: This is a simplified fix that targets the upper-center area where faces typically appear.</p>
-                                        </div>
-                                        <button onClick={handleRedEyeFix} className="w-full btn-primary">Fix Red-eye</button>
-                                    </div>
-                                )}
-
-                                {activeTool === "collage" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Combine 2-5 images into a collage.</p>
-
-                                        {/* Image List */}
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {collageImages.map((img, idx) => (
-                                                <div
-                                                    key={idx}
-                                                    onClick={() => setSelectedSlot(idx)}
-                                                    className={clsx(
-                                                        "relative aspect-square rounded-lg overflow-hidden border cursor-pointer transition-all",
-                                                        selectedSlot === idx ? "border-teal-400 ring-2 ring-teal-500/50" : "border-white/20 hover:border-white/50"
-                                                    )}
+                                {
+                                    activeTool === "convert" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400 mb-2">Convert image format.</p>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-2">Output Format</label>
+                                                <select
+                                                    value={selectedFormat}
+                                                    onChange={(e) => setSelectedFormat(e.target.value as "png" | "jpeg" | "webp" | "pdf")}
+                                                    className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/50"
                                                 >
-                                                    <img src={img} className="w-full h-full object-cover" />
+                                                    <option value="png">PNG</option>
+                                                    <option value="jpeg">JPG</option>
+                                                    <option value="webp">WebP</option>
+                                                    <option value="pdf">PDF (Download)</option>
+                                                </select>
+                                            </div>
+                                            <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">
+                                                <Download className="h-4 w-4" />
+                                                Apply
+                                            </button>
+                                        </div>
+                                    )
+                                }
+
+                                {
+                                    activeTool === "ocr" && (
+                                        <div className="flex-1 flex flex-col min-h-0">
+                                            {isProcessing ? (
+                                                <div className="flex flex-col items-center justify-center py-8">
+                                                    <Wand2 className="h-6 w-6 text-white animate-spin mb-2" />
+                                                    <p className="text-xs text-slate-400">Extracting text...</p>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <textarea
+                                                        className="flex-1 w-full bg-black/40 border border-white/10 rounded-lg p-3 text-sm text-slate-300 resize-none focus:outline-none focus:border-white/50 mb-4"
+                                                        value={extractedText}
+                                                        readOnly
+                                                        placeholder="Text will appear here..."
+                                                    />
                                                     <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setCollageImages(prev => prev.filter((_, i) => i !== idx));
-                                                            setCollageTransforms(prev => prev.filter((_, i) => i !== idx));
-                                                            if (selectedSlot >= collageImages.length - 1) setSelectedSlot(Math.max(0, collageImages.length - 2));
-                                                        }}
-                                                        className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        className="w-full btn-secondary flex items-center justify-center gap-2"
+                                                        onClick={() => { navigator.clipboard.writeText(extractedText) }}
+                                                        disabled={!extractedText}
                                                     >
-                                                        <X className="h-3 w-3" />
+                                                        Copy to Clipboard
                                                     </button>
-                                                    <div className="absolute bottom-0 left-0 bg-black/50 text-[10px] text-white px-1.5 py-0.5 rounded-tr">
-                                                        #{idx + 1}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            {collageImages.length < 5 && (
-                                                <div {...getCollageProps()} className="aspect-square border border-dashed border-white/20 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
-                                                    <input {...getCollageInputProps()} />
-                                                    <Plus className="h-6 w-6 text-slate-500" />
-                                                    <span className="text-[10px] text-slate-500 mt-1">Add Img</span>
-                                                </div>
+                                                </>
                                             )}
                                         </div>
+                                    )
+                                }
 
-                                        {/* Layout Selector */}
-                                        {collageImages.length >= 2 && (
-                                            <div>
-                                                <label className="text-xs text-slate-400 block mb-2">Select Layout</label>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    {AVAILABLE_LAYOUTS[collageImages.length]?.map(layout => (
-                                                        <button
-                                                            key={layout}
-                                                            onClick={() => setActiveLayout(layout)}
-                                                            className={clsx(
-                                                                "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
-                                                                activeLayout === layout
-                                                                    ? "border-teal-400 bg-teal-500/20 text-teal-300"
-                                                                    : "border-white/10 text-slate-400 hover:bg-white/5"
-                                                            )}
-                                                        >
-                                                            {layout}
-                                                        </button>
-                                                    ))}
-                                                </div>
+                                {
+                                    activeTool === "compress" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Reduce file size. Lower quality = smaller file.</p>
+                                            <div className="mb-4">
+                                                <Slider
+                                                    label="Quality"
+                                                    valueDisplay={`${compressionQuality}%`}
+                                                    min={10}
+                                                    max={100}
+                                                    value={compressionQuality}
+                                                    onChange={(e) => setCompressionQuality(parseInt(e.target.value))}
+                                                />
+                                                <p className="text-[10px] text-slate-500 mt-1">Lower quality = smaller file size</p>
                                             </div>
-                                        )}
+                                            <button onClick={handleCompress} className="w-full btn-primary">
+                                                <Minimize2 className="h-4 w-4" />
+                                                Apply
+                                            </button>
+                                        </div>
+                                    )
+                                }
 
-                                        {/* Transform Controls */}
-                                        {collageImages.length >= 2 && collageTransforms[selectedSlot] && (
-                                            <div className="border-t border-white/10 pt-4 space-y-3">
-                                                <div className="flex justify-between items-center">
-                                                    <label className="text-xs font-bold text-teal-400">Edit Image #{selectedSlot + 1}</label>
+                                {
+                                    activeTool === "filters" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Apply preset image filters.</p>
+                                            <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
+                                                {(['grayscale', 'sepia', 'vintage', 'oldCinema', 'retro', 'warm', 'cool', 'twilight', 'sunset', 'forest', 'rust', 'highContrast', 'noir', 'fade', 'kodak', 'technicolor', 'polaroid', 'dramatic', 'golden', 'cyberpunk'] as const).map((filter) => (
                                                     <button
-                                                        onClick={() => {
-                                                            const newT = [...collageTransforms];
-                                                            newT[selectedSlot] = { zoom: 1, panX: 0, panY: 0 };
-                                                            setCollageTransforms(newT);
-                                                        }}
-                                                        className="text-[10px] text-slate-400 hover:text-white"
+                                                        key={filter}
+                                                        onClick={() => setSelectedFilter(filter)}
+                                                        className={clsx(
+                                                            "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
+                                                            selectedFilter === filter
+                                                                ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                                : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                        )}
                                                     >
-                                                        Reset
+                                                        {filter.replace(/([A-Z])/g, ' $1').trim()}
                                                     </button>
-                                                </div>
-
-                                                {/* Zoom */}
-                                                <div className="mb-4">
-                                                    <Slider
-                                                        label="Zoom"
-                                                        valueDisplay={`${collageTransforms[selectedSlot].zoom.toFixed(1)}x`}
-                                                        min={0.5}
-                                                        max={3}
-                                                        step={0.1}
-                                                        value={collageTransforms[selectedSlot].zoom}
-                                                        onChange={(e) => {
-                                                            const newT = [...collageTransforms];
-                                                            newT[selectedSlot] = { ...newT[selectedSlot], zoom: parseFloat(e.target.value) };
-                                                            setCollageTransforms(newT);
-                                                        }}
-                                                    />
-                                                </div>
-
-                                                {/* Pan X */}
-                                                <div className="mb-4">
-                                                    <Slider
-                                                        label="Pan Horizontal"
-                                                        min={-0.5}
-                                                        max={0.5}
-                                                        step={0.05}
-                                                        value={collageTransforms[selectedSlot].panX}
-                                                        onChange={(e) => {
-                                                            const newT = [...collageTransforms];
-                                                            newT[selectedSlot] = { ...newT[selectedSlot], panX: parseFloat(e.target.value) };
-                                                            setCollageTransforms(newT);
-                                                        }}
-                                                    />
-                                                </div>
-
-                                                {/* Pan Y */}
-                                                <div className="mb-4">
-                                                    <Slider
-                                                        label="Pan Vertical"
-                                                        min={-0.5}
-                                                        max={0.5}
-                                                        step={0.05}
-                                                        value={collageTransforms[selectedSlot].panY}
-                                                        onChange={(e) => {
-                                                            const newT = [...collageTransforms];
-                                                            newT[selectedSlot] = { ...newT[selectedSlot], panY: parseFloat(e.target.value) };
-                                                            setCollageTransforms(newT);
-                                                        }}
-                                                    />
-                                                </div>
+                                                ))}
                                             </div>
-                                        )}
+                                            <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Filter</button>
+                                        </div>
+                                    )
+                                }
 
-                                        {/* Actions */}
-                                        {collageImages.length >= 2 && (
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => setCollageImages(prev => [...prev].sort(() => Math.random() - 0.5))}
-                                                    className="flex-1 btn-secondary flex items-center justify-center gap-2"
-                                                >
-                                                    <Shuffle className="h-4 w-4" /> Shuffle
-                                                </button>
-                                                <button
-                                                    onClick={() => {
-                                                        if (previewSrc) {
-                                                            pushState({ ...imageState!, processedSrc: previewSrc });
-                                                            setActiveTool(null);
-                                                            setCollageImages([]);
-                                                            setActiveLayout(null);
-                                                            setPreviewSrc(null);
-                                                        }
-                                                    }}
-                                                    disabled={!previewSrc}
-                                                    className="flex-1 btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
-                                                >
-                                                    <Check className="h-4 w-4" /> Apply
-                                                </button>
+                                {
+                                    activeTool === "social-filters" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Trendy social media filters.</p>
+                                            <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
+                                                {(['clarendon', 'gingham', 'juno', 'lark', 'ludwig', 'valencia', 'moon', 'reyes', 'slumber', 'crema', 'aden', 'perpetua'] as const).map((filter) => (
+                                                    <button
+                                                        key={filter}
+                                                        onClick={() => setSelectedFilter(filter)}
+                                                        className={clsx(
+                                                            "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
+                                                            selectedFilter === filter
+                                                                ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                                : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                        )}
+                                                    >
+                                                        {filter}
+                                                    </button>
+                                                ))}
                                             </div>
-                                        )}
-                                    </div>
-                                )}
+                                            <button onClick={handleApplyFilter} className="w-full btn-primary">Apply</button>
+                                        </div>
+                                    )
+                                }
 
-                                {activeTool === "draw" && (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-slate-400">Draw on your image with pen, highlighter, or eraser.</p>
+                                {
+                                    activeTool === "adjust" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Adjust brightness, contrast, and saturation.</p>
+                                            <div className="space-y-6">
+                                                <Slider
+                                                    label="Brightness"
+                                                    valueDisplay={`${brightness}%`}
+                                                    min={0}
+                                                    max={200}
+                                                    value={brightness}
+                                                    onChange={(e) => setBrightness(parseInt(e.target.value))}
+                                                />
+                                                <Slider
+                                                    label="Contrast"
+                                                    valueDisplay={`${contrast}%`}
+                                                    min={0}
+                                                    max={200}
+                                                    value={contrast}
+                                                    onChange={(e) => setContrast(parseInt(e.target.value))}
+                                                />
+                                                <Slider
+                                                    label="Saturation"
+                                                    valueDisplay={`${saturation}%`}
+                                                    min={0}
+                                                    max={200}
+                                                    value={saturation}
+                                                    onChange={(e) => setSaturation(parseInt(e.target.value))}
+                                                />
+                                            </div>
+                                            <button onClick={handleApplyAdjustments} className="w-full btn-primary">
+                                                <Sliders className="h-4 w-4" />
+                                                Apply
+                                            </button>
+                                        </div>
+                                    )
+                                }
 
-                                        {/* Drawing Mode Selection */}
-                                        <div>
-                                            <label className="text-xs text-slate-400 block mb-2">Tool</label>
-                                            <div className="grid grid-cols-3 gap-2">
+                                {
+                                    activeTool === "transform" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Rotate and flip your image.</p>
+
+                                            {/* Custom Rotation Slider */}
+                                            <div className="pt-4 border-t border-white/10 mb-4">
+                                                <Slider
+                                                    label="Custom Rotation"
+                                                    valueDisplay={`${rotation}°`}
+                                                    min={-180}
+                                                    max={180}
+                                                    value={rotation}
+                                                    onChange={(e) => setRotation(parseInt(e.target.value))}
+                                                />
+                                            </div>
+                                            {rotation !== 0 && (
                                                 <button
-                                                    onClick={() => setDrawingMode('pen')}
-                                                    className={clsx(
-                                                        "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                                        drawingMode === 'pen' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                                    )}
+                                                    onClick={() => handleRotate(rotation)}
+                                                    className="w-full btn-primary mt-2"
                                                 >
-                                                    <Pencil className="h-3 w-3" /> Pen
+                                                    <RotateCw className="h-4 w-4" />
+                                                    Apply
                                                 </button>
-                                                <button
-                                                    onClick={() => setDrawingMode('highlighter')}
-                                                    className={clsx(
-                                                        "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                                        drawingMode === 'highlighter' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                                    )}
-                                                >
-                                                    <Highlighter className="h-3 w-3" /> Highlight
+                                            )}
+
+                                            <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-4">
+                                                <button onClick={() => handleRotate(-90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                                    <RotateCcw className="h-4 w-4" />
+                                                    <span className="text-xs">Left 90°</span>
                                                 </button>
-                                                <button
-                                                    onClick={() => setDrawingMode('eraser')}
-                                                    className={clsx(
-                                                        "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
-                                                        drawingMode === 'eraser' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
-                                                    )}
-                                                >
-                                                    <Eraser className="h-3 w-3" /> Eraser
+                                                <button onClick={() => handleRotate(90)} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                                    <RotateCw className="h-4 w-4" />
+                                                    <span className="text-xs">Right 90°</span>
+                                                </button>
+                                                <button onClick={() => handleFlip('horizontal')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                                    <FlipHorizontal className="h-4 w-4" />
+                                                    <span className="text-xs">Flip H</span>
+                                                </button>
+                                                <button onClick={() => handleFlip('vertical')} className="flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5 transition-colors">
+                                                    <FlipVertical className="h-4 w-4" />
+                                                    <span className="text-xs">Flip V</span>
                                                 </button>
                                             </div>
                                         </div>
+                                    )
+                                }
 
-                                        {/* Color Picker */}
-                                        {drawingMode !== 'eraser' && (
+                                {
+                                    activeTool === "blur" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Apply blur or sharpen effect.</p>
                                             <div>
-                                                <label className="text-xs text-slate-400 block mb-2">Color</label>
-                                                <div className="flex items-center gap-2">
-                                                    <input
-                                                        type="color"
-                                                        value={brushColor}
-                                                        onChange={(e) => setBrushColor(e.target.value)}
-                                                        className="w-10 h-10 rounded-lg border border-white/20 cursor-pointer bg-transparent"
-                                                    />
-                                                    <div className="flex gap-1">
-                                                        {['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#000000'].map(color => (
+                                                <Slider
+                                                    label="Blur Amount"
+                                                    valueDisplay={`${blurAmount}px`}
+                                                    min={0}
+                                                    max={20}
+                                                    value={blurAmount}
+                                                    onChange={(e) => setBlurAmount(parseInt(e.target.value))}
+                                                />
+                                            </div>
+                                            <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">
+                                                <Droplets className="h-4 w-4" />
+                                                Apply
+                                            </button>
+                                            <div className="border-t border-white/10 pt-4">
+                                                <Slider
+                                                    label="Sharpen Amount"
+                                                    valueDisplay={`${sharpenAmount}%`}
+                                                    min={0}
+                                                    max={100}
+                                                    value={sharpenAmount}
+                                                    onChange={(e) => setSharpenAmount(parseInt(e.target.value))}
+                                                />
+                                            </div>
+                                            <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">
+                                                <Zap className="h-4 w-4" />
+                                                Apply
+                                            </button>
+                                        </div>
+                                    )
+                                }
+
+                                {
+                                    activeTool === "redeye" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Click the button to automatically detect and fix red-eye in the center area of the image.</p>
+                                            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+                                                <p className="text-xs text-yellow-400">Note: This is a simplified fix that targets the upper-center area where faces typically appear.</p>
+                                            </div>
+                                            <button onClick={handleRedEyeFix} className="w-full btn-primary">Fix Red-eye</button>
+                                        </div>
+                                    )
+                                }
+
+                                {
+                                    activeTool === "collage" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Combine 2-5 images into a collage.</p>
+
+                                            {/* Image List */}
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {collageImages.map((img, idx) => (
+                                                    <div
+                                                        key={idx}
+                                                        onClick={() => setSelectedSlot(idx)}
+                                                        className={clsx(
+                                                            "relative aspect-square rounded-lg overflow-hidden border cursor-pointer transition-all",
+                                                            selectedSlot === idx ? "border-teal-400 ring-2 ring-teal-500/50" : "border-white/20 hover:border-white/50"
+                                                        )}
+                                                    >
+                                                        <img src={img} className="w-full h-full object-cover" />
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setCollageImages(prev => prev.filter((_, i) => i !== idx));
+                                                                setCollageTransforms(prev => prev.filter((_, i) => i !== idx));
+                                                                if (selectedSlot >= collageImages.length - 1) setSelectedSlot(Math.max(0, collageImages.length - 2));
+                                                            }}
+                                                            className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                        <div className="absolute bottom-0 left-0 bg-black/50 text-[10px] text-white px-1.5 py-0.5 rounded-tr">
+                                                            #{idx + 1}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {collageImages.length < 5 && (
+                                                    <div {...getCollageProps()} className="aspect-square border border-dashed border-white/20 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-colors">
+                                                        <input {...getCollageInputProps()} />
+                                                        <Plus className="h-6 w-6 text-slate-500" />
+                                                        <span className="text-[10px] text-slate-500 mt-1">Add Img</span>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Layout Selector */}
+                                            {collageImages.length >= 2 && (
+                                                <div>
+                                                    <label className="text-xs text-slate-400 block mb-2">Select Layout</label>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        {AVAILABLE_LAYOUTS[collageImages.length]?.map(layout => (
                                                             <button
-                                                                key={color}
-                                                                onClick={() => setBrushColor(color)}
+                                                                key={layout}
+                                                                onClick={() => setActiveLayout(layout)}
                                                                 className={clsx(
-                                                                    "w-6 h-6 rounded-full border-2 transition-transform hover:scale-110",
-                                                                    brushColor === color ? "border-white" : "border-white/20"
+                                                                    "px-3 py-2 text-xs rounded-lg border transition-all capitalize",
+                                                                    activeLayout === layout
+                                                                        ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                                        : "border-white/10 text-slate-400 hover:bg-white/5"
                                                                 )}
-                                                                style={{ backgroundColor: color }}
-                                                            />
+                                                            >
+                                                                {layout}
+                                                            </button>
                                                         ))}
                                                     </div>
                                                 </div>
-                                            </div>
-                                        )}
+                                            )}
 
-                                        {/* Brush Size */}
-                                        <div>
-                                            <Slider
-                                                label="Brush Size"
-                                                valueDisplay={`${brushSize}px`}
-                                                min={1}
-                                                max={30}
-                                                value={brushSize}
-                                                onChange={(e) => setBrushSize(parseInt(e.target.value))}
-                                            />
+                                            {/* Transform Controls */}
+                                            {collageImages.length >= 2 && collageTransforms[selectedSlot] && (
+                                                <div className="border-t border-white/10 pt-4 space-y-3">
+                                                    <div className="flex justify-between items-center">
+                                                        <label className="text-xs font-bold text-teal-400">Edit Image #{selectedSlot + 1}</label>
+                                                        <button
+                                                            onClick={() => {
+                                                                const newT = [...collageTransforms];
+                                                                newT[selectedSlot] = { zoom: 1, panX: 0, panY: 0 };
+                                                                setCollageTransforms(newT);
+                                                            }}
+                                                            className="text-[10px] text-slate-400 hover:text-white"
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Zoom */}
+                                                    <div className="mb-4">
+                                                        <Slider
+                                                            label="Zoom"
+                                                            valueDisplay={`${collageTransforms[selectedSlot].zoom.toFixed(1)}x`}
+                                                            min={0.5}
+                                                            max={3}
+                                                            step={0.1}
+                                                            value={collageTransforms[selectedSlot].zoom}
+                                                            onChange={(e) => {
+                                                                const newT = [...collageTransforms];
+                                                                newT[selectedSlot] = { ...newT[selectedSlot], zoom: parseFloat(e.target.value) };
+                                                                setCollageTransforms(newT);
+                                                            }}
+                                                        />
+                                                    </div>
+
+                                                    {/* Pan X */}
+                                                    <div className="mb-4">
+                                                        <Slider
+                                                            label="Pan Horizontal"
+                                                            min={-0.5}
+                                                            max={0.5}
+                                                            step={0.05}
+                                                            value={collageTransforms[selectedSlot].panX}
+                                                            onChange={(e) => {
+                                                                const newT = [...collageTransforms];
+                                                                newT[selectedSlot] = { ...newT[selectedSlot], panX: parseFloat(e.target.value) };
+                                                                setCollageTransforms(newT);
+                                                            }}
+                                                        />
+                                                    </div>
+
+                                                    {/* Pan Y */}
+                                                    <div className="mb-4">
+                                                        <Slider
+                                                            label="Pan Vertical"
+                                                            min={-0.5}
+                                                            max={0.5}
+                                                            step={0.05}
+                                                            value={collageTransforms[selectedSlot].panY}
+                                                            onChange={(e) => {
+                                                                const newT = [...collageTransforms];
+                                                                newT[selectedSlot] = { ...newT[selectedSlot], panY: parseFloat(e.target.value) };
+                                                                setCollageTransforms(newT);
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Actions */}
+                                            {collageImages.length >= 2 && (
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => setCollageImages(prev => [...prev].sort(() => Math.random() - 0.5))}
+                                                        className="flex-1 btn-secondary flex items-center justify-center gap-2"
+                                                    >
+                                                        <Shuffle className="h-4 w-4" /> Shuffle
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            if (previewSrc) {
+                                                                pushState({ ...imageState!, processedSrc: previewSrc });
+                                                                setActiveTool(null);
+                                                                setCollageImages([]);
+                                                                setActiveLayout(null);
+                                                                setPreviewSrc(null);
+                                                            }
+                                                        }}
+                                                        disabled={!previewSrc}
+                                                        className="flex-1 btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
+                                                    >
+                                                        <Check className="h-4 w-4" /> Apply
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
+                                    )
+                                }
 
-                                        {/* Highlighter Opacity - Only show for highlighter */}
-                                        {drawingMode === 'highlighter' && (
+                                {
+                                    activeTool === "draw" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Draw on your image with pen, highlighter, or eraser.</p>
+
+                                            {/* Drawing Mode Selection */}
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-2">Tool</label>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    <button
+                                                        onClick={() => setDrawingMode('pen')}
+                                                        className={clsx(
+                                                            "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                            drawingMode === 'pen' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                        )}
+                                                    >
+                                                        <Pencil className="h-3 w-3" /> Pen
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setDrawingMode('highlighter')}
+                                                        className={clsx(
+                                                            "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                            drawingMode === 'highlighter' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                        )}
+                                                    >
+                                                        <Highlighter className="h-3 w-3" /> Highlight
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setDrawingMode('eraser')}
+                                                        className={clsx(
+                                                            "flex items-center justify-center gap-1 px-2 py-2 rounded-lg border text-xs transition-all",
+                                                            drawingMode === 'eraser' ? "border-teal-400 bg-teal-500/20 text-teal-300" : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                        )}
+                                                    >
+                                                        <Eraser className="h-3 w-3" /> Eraser
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Color Picker */}
+                                            {drawingMode !== 'eraser' && (
+                                                <div>
+                                                    <label className="text-xs text-slate-400 block mb-2">Color</label>
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="color"
+                                                            value={brushColor}
+                                                            onChange={(e) => setBrushColor(e.target.value)}
+                                                            className="w-10 h-10 rounded-lg border border-white/20 cursor-pointer bg-transparent"
+                                                        />
+                                                        <div className="flex gap-1">
+                                                            {['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffffff', '#000000'].map(color => (
+                                                                <button
+                                                                    key={color}
+                                                                    onClick={() => setBrushColor(color)}
+                                                                    className={clsx(
+                                                                        "w-6 h-6 rounded-full border-2 transition-transform hover:scale-110",
+                                                                        brushColor === color ? "border-white" : "border-white/20"
+                                                                    )}
+                                                                    style={{ backgroundColor: color }}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Brush Size */}
                                             <div>
                                                 <Slider
-                                                    label="Opacity"
-                                                    valueDisplay={`${Math.round(highlighterOpacity * 100)}%`}
-                                                    min={10}
-                                                    max={100}
-                                                    step={5}
-                                                    value={highlighterOpacity * 100}
-                                                    onChange={(e) => setHighlighterOpacity(parseInt(e.target.value) / 100)}
+                                                    label="Brush Size"
+                                                    valueDisplay={`${brushSize}px`}
+                                                    min={1}
+                                                    max={200}
+                                                    value={brushSize}
+                                                    onChange={(e) => setBrushSize(parseInt(e.target.value))}
                                                 />
                                             </div>
-                                        )}
 
-                                        {/* Action Buttons */}
-                                        <div className="flex gap-2">
-                                            <button onClick={clearDrawing} className="flex-1 btn-secondary">Clear</button>
-                                            <button onClick={applyDrawing} className="flex-1 btn-primary">Apply Drawing</button>
+                                            {/* Highlighter Opacity - Only show for highlighter */}
+                                            {drawingMode === 'highlighter' && (
+                                                <div>
+                                                    <Slider
+                                                        label="Opacity"
+                                                        valueDisplay={`${Math.round(highlighterOpacity * 100)}%`}
+                                                        min={10}
+                                                        max={100}
+                                                        step={5}
+                                                        value={highlighterOpacity * 100}
+                                                        onChange={(e) => setHighlighterOpacity(parseInt(e.target.value) / 100)}
+                                                    />
+                                                </div>
+                                            )}
+
+                                            {/* Action Buttons */}
+                                            <div className="flex gap-2">
+                                                <button onClick={clearDrawing} className="flex-1 btn-secondary">Clear</button>
+                                                <button onClick={applyDrawing} className="flex-1 btn-primary">Apply Drawing</button>
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )
+                                }
                             </>
                         )}
-                    </aside>
+                    </aside >
                 )
             }
+            {/* Custom Cursor */}
+            {activeTool === "draw" && showCursor && (
+                <div
+                    className="fixed pointer-events-none rounded-full z-[100]"
+                    style={{
+                        left: cursorPos.x,
+                        top: cursorPos.y,
+                        width: `${(brushSize * (drawingMode === 'highlighter' ? 3 : 1)) * imageScale}px`,
+                        height: `${(brushSize * (drawingMode === 'highlighter' ? 3 : 1)) * imageScale}px`,
+                        transform: 'translate(-50%, -50%)',
+                        border: '1px solid white',
+                        boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
+                        backgroundColor: 'transparent'
+                    }}
+                />
+            )}
         </div >
     );
 }

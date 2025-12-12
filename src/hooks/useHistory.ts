@@ -45,6 +45,9 @@ export function useHistory<T>(initialState: T) {
         pushState,
         undo,
         redo,
+        setHistory: useCallback((history: T[], index: number) => {
+            setState({ history, index });
+        }, []),
         canUndo: state.index > 0,
         canRedo: state.index < state.history.length - 1,
         history: state.history,

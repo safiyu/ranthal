@@ -15,6 +15,13 @@
       "when": 1765403231792,
       "tag": "0001_quick_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1765481172958,
+      "tag": "0002_slimy_human_fly",
+      "breakpoints": true
     }
   ]
 }

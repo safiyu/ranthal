@@ -14,7 +14,11 @@ const APP_INFO = {
     description: "A professional image editor with AI-powered features including background removal, OCR, filters, and more."
 };
 
-export function AboutButton() {
+export interface AboutButtonProps {
+    variant?: 'text' | 'icon';
+}
+
+export function AboutButton({ variant = 'text' }: AboutButtonProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [mounted, setMounted] = useState(false);
 
@@ -107,15 +111,24 @@ export function AboutButton() {
 
     return (
         <>
-            <button
-                onClick={() => setIsOpen(true)}
-                className="flex items-center gap-2 text-sm font-medium text-white/70 hover:text-white transition-colors"
-                title="About"
-            >
-                <Info className="h-4 w-4" />
-                <span>About</span>
-            </button>
-
+            {variant === 'icon' ? (
+                <button
+                    onClick={() => setIsOpen(true)}
+                    className="flex p-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                    title="About"
+                >
+                    <Info className="h-5 w-5" />
+                </button>
+            ) : (
+                <button
+                    onClick={() => setIsOpen(true)}
+                    className="flex items-center gap-2 text-sm font-medium text-white/70 hover:text-white transition-colors"
+                    title="About"
+                >
+                    <Info className="h-4 w-4" />
+                    <span>About</span>
+                </button>
+            )}
             {/* Render modal in portal if open and mounted */}
             {isOpen && mounted ? createPortal(modalContent, document.body) : null}
         </>

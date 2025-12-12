@@ -34,7 +34,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     if (!user) return null;
                     const passwordsMatch = await comparePassword(password, user.passwordHash);
                     if (passwordsMatch) {
-                        if (!user.approved) {
+                        // Allow admins to login even if not explicitly marked as approved (they are approved by definition)
+                        if (!user.approved && user.role !== 'admin') {
                             throw new Error("User not approved");
                         }
                         return user;

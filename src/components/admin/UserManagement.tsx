@@ -13,7 +13,7 @@ type User = {
     createdAt: Date | null;
 };
 
-export default function UserManagement({ users }: { users: User[] }) {
+export default function UserManagement({ users, currentUserId }: { users: User[], currentUserId?: string }) {
     const [isLoading, setIsLoading] = useState<string | null>(null);
     const router = useRouter();
 
@@ -66,7 +66,7 @@ export default function UserManagement({ users }: { users: User[] }) {
                                 )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                {!user.approved && (
+                                {!user.approved && user.role !== "admin" && (
                                     <button
                                         onClick={() => handleApprove(user.id)}
                                         disabled={isLoading === user.id}
@@ -75,13 +75,15 @@ export default function UserManagement({ users }: { users: User[] }) {
                                         {isLoading === user.id ? "Processing..." : "Approve"}
                                     </button>
                                 )}
-                                <button
-                                    onClick={() => handleDelete(user.id)}
-                                    disabled={isLoading === user.id}
-                                    className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50"
-                                >
-                                    Delete
-                                </button>
+                                {user.id !== currentUserId && (
+                                    <button
+                                        onClick={() => handleDelete(user.id)}
+                                        disabled={isLoading === user.id}
+                                        className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50"
+                                    >
+                                        Delete
+                                    </button>
+                                )}
                             </td>
                         </tr>
                     ))}

@@ -14,7 +14,7 @@ export default async function AdminUsersPage() {
     return (
         <div className="container mx-auto px-4 py-8">
             <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">User Management</h1>
-            <UserManagement users={users as any} />
+            <UserManagement users={users as any} currentUserId={session?.user?.id} />
         </div>
     );
 }

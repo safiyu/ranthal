@@ -1,7 +1,35 @@
 import Link from "next/link";
 import { ArrowRight, Crop, ImagePlus, ScanText, Sparkles, Layers } from "lucide-react";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { count } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { sql } from "drizzle-orm";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  let shouldRedirect = false;
+
+  // Check if any users exist - redirect to setup if not
+  try {
+    const userCount = await db.select({ count: count() }).from(users).get();
+    console.log("Setup check - User count result:", userCount);
+
+    if (!userCount || userCount.count === 0) {
+      shouldRedirect = true;
+    }
+  } catch (e) {
+    console.error("Failed to check user count:", e);
+    // Be safer: if we can't check the DB, we probably shouldn't show the app
+    // checking for specific error might be needed but for now this is safe
+    shouldRedirect = true;
+  }
+
+  if (shouldRedirect) {
+    redirect("/setup");
+  }
+
   return (
     <div className="flex flex-col min-h-[calc(100vh-64px)]">
       {/* Hero Section */}
