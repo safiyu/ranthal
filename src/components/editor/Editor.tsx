@@ -45,7 +45,8 @@ import {
     Eraser,
     Filter,
     Focus,
-    Sun
+    QrCode,
+    Sparkles
 } from "lucide-react";
 import { saveEdit } from "@/app/actions";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -54,12 +55,16 @@ import { removeBg, extractText, compressImage, cancelBgRemoval, cancelOcr } from
 import { createIDCard } from "@/lib/id-card-utils";
 import { createCollage, AVAILABLE_LAYOUTS, type LayoutType, type CollageTransform } from "@/lib/collage-utils";
 import getCroppedImg from "@/lib/crop-utils";
-import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, type FilterName, FILTER_PRESETS } from "@/lib/image-effects";
+import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, remasterImage, type FilterName, FILTER_PRESETS } from "@/lib/image-effects";
 import { useToast } from "@/components/Toast";
 import { jsPDF } from "jspdf";
 import EXIF from "exif-js";
+import { generateQRCode, formatWifi, formatVCard, formatSms, formatEmail, formatPhone, formatGeo } from "@/lib/qr-utils";
+import { STICKER_CATEGORIES, emojiToDataURL } from "@/lib/sticker-utils";
+import { overlayImage } from "@/lib/image-processing";
+import { Sticker as StickerIcon } from "lucide-react";
 
-type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "social-filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand" | "collage";
+type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "social-filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand" | "collage" | "qr-code" | "sticker" | "remaster";
 type DrawingMode = "pen" | "highlighter" | "eraser";
 
 
@@ -128,7 +133,7 @@ export function Editor() {
     const [selectedFormat, setSelectedFormat] = useState<"png" | "jpeg" | "webp" | "pdf">("png");
 
     // Filters State
-    const [selectedFilter, setSelectedFilter] = useState<FilterName>("grayscale");
+    const [selectedFilter, setSelectedFilter] = useState<FilterName>("none");
 
     // Adjustments State
     const [brightness, setBrightness] = useState(100);
@@ -158,10 +163,88 @@ export function Editor() {
     const [collageTransforms, setCollageTransforms] = useState<CollageTransform[]>([]);
     const [selectedSlot, setSelectedSlot] = useState<number>(0);
 
+    // QR Code State
+    const [qrText, setQrText] = useState("");
+    const [qrType, setQrType] = useState<"text" | "url" | "wifi" | "contact" | "phone" | "email" | "sms" | "geo">("text");
+    const [qrData, setQrData] = useState<any>({});
+    const [qrCodeSrc, setQrCodeSrc] = useState<string | null>(null);
+    const [qrPosition, setQrPosition] = useState({ x: 0, y: 0 });
+    const [qrSize, setQrSize] = useState(200);
+
+    // Sticker State
+    const [activeSticker, setActiveSticker] = useState<string | null>(null);
+    const [stickerPos, setStickerPos] = useState({ x: 0, y: 0 });
+    const [stickerSize, setStickerSize] = useState(200);
+    const [activeStickerTab, setActiveStickerTab] = useState(STICKER_CATEGORIES[0].id);
+
     // Preview State (for real-time collage/adjustments before commit)
     const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
-    const currentImage = previewSrc || imageState?.processedSrc || imageState?.src;
+    // Comparison State
+    const [isComparing, setIsComparing] = useState(false);
+    const [compareSnapshot, setCompareSnapshot] = useState<string | null>(null);
+
+    // Ref for imageState to avoid stale closures in callbacks
+    const imageStateRef = useRef(imageState);
+    useEffect(() => {
+        imageStateRef.current = imageState;
+    }, [imageState]);
+
+    // Derived State
+    // If comparing, show the SNAPSHOT (or last committed/original if no snapshot).
+    // If not comparing, show preview first, then processed, then original.
+    // "Before" = compareSnapshot || imageState.processedSrc || imageState.src
+    // "After" = previewSrc
+    // Derived State
+    const baseImage = imageState?.processedSrc || imageState?.src;
+
+    // Ref to track latest baseImage without closure staleness during callbacks
+    const baseImageRef = useRef(baseImage);
+    useEffect(() => {
+        baseImageRef.current = baseImage;
+    }, [baseImage]);
+
+    // Logic: 
+    // Comparing? -> Show Snapshot (if exists) or Base (fallback).
+    // Not Comparing? -> Show Preview (if exists) or Base (fallback).
+    const currentImage = isComparing
+        ? (compareSnapshot || baseImage)
+        : (previewSrc || baseImage);
+
+    // Snapshot Effect REDUNDANT - Removed in favor of explicit handler
+
+    // Explicit Tool Activation Handler
+    const activateTool = (tool: Tool) => {
+        const currentBase = baseImageRef.current;
+        console.log(`[${Date.now()}] activateTool called for: ${tool}`);
+        console.log(`[${Date.now()}] activateTool: baseImageRef length:`, currentBase ? currentBase.length : 'null');
+        console.log(`[${Date.now()}] activateTool: imageState.processedSrc length:`, imageState?.processedSrc ? imageState.processedSrc.length : 'null');
+
+        // 1. Capture Snapshot (if applicable)
+        if (!['crop', 'compress', 'convert', 'resize', 'id-card', 'hand'].includes(tool)) {
+            if (currentBase) {
+                setCompareSnapshot(currentBase);
+            }
+        } else {
+            setCompareSnapshot(null);
+        }
+
+        // 2. Clear Preview & Reset Tool States
+        setPreviewSrc(null);
+        setIsComparing(false);
+
+        // Reset ALL effect tool states to clear lingering effects
+        setSelectedFilter('none');
+        setBlurAmount(0);
+        setSharpenAmount(0);
+        setBrightness(100);
+        setContrast(100);
+        setSaturation(100);
+        setRotation(0);
+
+        // 3. Set Active Tool
+        setActiveTool(tool);
+    };
 
     // Cursor State
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
@@ -180,26 +263,72 @@ export function Editor() {
         }
     }, []);
 
+    // Live Preview for Blur/Sharpen
+    useEffect(() => {
+        if (activeTool !== 'blur') {
+            if (previewSrc && (blurAmount > 0 || sharpenAmount > 0)) {
+                setPreviewSrc(null); // Cleanup if tool changed but preview remained
+            }
+            return;
+        }
+
+        const baseImage = imageState?.processedSrc || imageState?.src;
+        if (!baseImage) return;
+
+        // Debounce preview generation
+        const timer = setTimeout(async () => {
+            if (blurAmount === 0 && sharpenAmount === 0) {
+                setPreviewSrc(null);
+                return;
+            }
+
+            try {
+                let result = baseImage;
+                if (blurAmount > 0) {
+                    result = await applyBlur(result, blurAmount);
+                }
+                if (sharpenAmount > 0) {
+                    result = await applySharpen(result, sharpenAmount / 100);
+                }
+                setPreviewSrc(result);
+            } catch (e) {
+                console.error("Preview generation failed", e);
+            }
+        }, 300); // 300ms debounce
+
+        return () => clearTimeout(timer);
+    }, [activeTool, blurAmount, sharpenAmount, imageState]);
+
+    // Auto-resize canvas when window resizes
     useEffect(() => {
         updateImageScale();
         window.addEventListener('resize', updateImageScale);
         return () => window.removeEventListener('resize', updateImageScale);
-    }, [viewZoom, currentImage, activeTool, updateImageScale]);
+    }, [currentImage, activeTool, updateImageScale]);
 
 
     // CSS Filter string for real-time preview
     const getPreviewFilter = () => {
-        if (activeTool === "filters" || activeTool === "social-filters") {
-            // Use imported presets or fallback
-            return FILTER_PRESETS[selectedFilter] || "";
+        // If comparing, we want to see the RAW snapshot/original without any overlays
+        if (isComparing) return 'none';
+
+        const filters = [];
+
+        // Only apply CSS filter preset if we are NOT viewing a baked preview of it.
+        // If (activeTool is filters/social) AND (previewSrc is set), it means previewSrc has the filter baked in.
+        // So we skip adding the CSS filter to avoid double application.
+        const isBakedPreview = (activeTool === 'filters' || activeTool === 'social-filters') && previewSrc;
+
+        if (selectedFilter !== 'none' && FILTER_PRESETS[selectedFilter] && !isBakedPreview) {
+            filters.push(FILTER_PRESETS[selectedFilter]);
         }
-        if (activeTool === "adjust") {
-            return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`;
-        }
-        if (activeTool === "blur" && blurAmount > 0) {
-            return `blur(${blurAmount}px)`;
-        }
-        return 'none';
+        if (brightness !== 100) filters.push(`brightness(${brightness}%)`);
+        if (contrast !== 100) filters.push(`contrast(${contrast}%)`);
+        if (saturation !== 100) filters.push(`saturate(${saturation}%)`);
+        if (blurAmount > 0) filters.push(`blur(${blurAmount / 10}px)`);
+
+        // Note: Sharpen creates a new image instead of CSS filter
+        return filters.join(' ');
     };
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -312,6 +441,84 @@ export function Editor() {
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
+        }
+    };
+
+    const handleRemaster = async () => {
+        if (!baseImage) return;
+        setIsProcessing(true);
+        try {
+            const newSrc = await remasterImage(baseImage);
+            setPreviewSrc(newSrc);
+            // We do NOT push state here. User must confirm.
+        } catch (err) {
+            showToast("Remaster failed", "error");
+            setActiveTool(null);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    // Generic Apply/Cancel for Preview Tools
+    const applyPreview = () => {
+        // Special case for adjustments (CSS only, no separate previewSrc usually, unless we want to commit the CSS)
+        // Wait, applyAdjustments creates a new src. 
+        if (activeTool === 'adjust') {
+            handleApplyAdjustments();
+            return;
+        }
+
+        const currentImageState = imageStateRef.current; // Use Ref for freshness
+
+        try {
+            if (previewSrc && currentImageState) {
+                console.log(`[${Date.now()}] applyPreview: Applying preview...`);
+
+                // Safety Check for Large Images
+                // Large image check removed per user request
+
+                const newState = { ...currentImageState, processedSrc: previewSrc };
+
+                // Attempt push
+                pushState(newState);
+
+                console.log(`[${Date.now()}] applyPreview: PushState called.`);
+                showToast(`Filter applied!`, "success");
+
+                setPreviewSrc(null);
+
+                // Reset states to prevent double-application (visual glitch)
+                setSelectedFilter('none');
+                setBlurAmount(0);
+                setSharpenAmount(0);
+
+                // Close tool on apply
+                if (activeTool === 'remaster' || activeTool === 'filters' || activeTool === 'social-filters') {
+                    setActiveTool(null);
+                }
+            } else {
+                console.warn("Cannot apply preview: previewSrc or imageState missing", { previewSrc: !!previewSrc, imageState: !!currentImageState });
+                showToast("Error: No preview to apply", "error");
+            }
+        } catch (e: any) {
+            console.error("Crash in applyPreview:", e);
+            // using confirm to avoid strict alert blocking, simpler than toast if toast system is crashing
+            window.alert("Critical Error Applying Filter: " + e.message);
+        }
+    };
+
+    const cancelPreview = () => {
+        setPreviewSrc(null);
+        if (activeTool === 'adjust') {
+            // Reset adjustments on cancel but stay in tool? Or exit?
+            // User requested "Apply/Cancel" buttons. Usually Cancel exits or just resets.
+            // Let's reset values.
+            setBrightness(100);
+            setContrast(100);
+            setSaturation(100);
+            setActiveTool(null);
+        } else {
+            if (activeTool === 'remaster') setActiveTool(null);
         }
     };
 
@@ -689,20 +896,28 @@ export function Editor() {
         }
     };
 
-    // Filter handler
-    const handleApplyFilter = async () => {
-        if (!currentImage) return;
+    // Generate preview for selected filter
+    const updateFilterPreview = async () => {
+        if (!baseImageRef.current) return;
+
         setIsProcessing(true);
         try {
-            const newSrc = await applyFilter(currentImage, selectedFilter);
-            pushState({ ...imageState!, processedSrc: newSrc });
+            const newSrc = await applyFilter(baseImageRef.current, selectedFilter);
+            setPreviewSrc(newSrc);
         } catch (err) {
-            showToast("Failed to apply filter", "error");
+            console.error("Filter preview error:", err);
+            // Don't toast on every selection change, it's annoying
         } finally {
             setIsProcessing(false);
-            setActiveTool(null);
         }
     };
+
+    // Auto-update filter preview when selection changes
+    useEffect(() => {
+        if ((activeTool === 'filters' || activeTool === 'social-filters') && baseImageRef.current) {
+            updateFilterPreview();
+        }
+    }, [selectedFilter, activeTool]); // Removed baseImage dependency to avoid loops, though Ref handles it
 
     // Adjustments handler
     const handleApplyAdjustments = async () => {
@@ -711,8 +926,18 @@ export function Editor() {
         try {
             const newSrc = await applyAdjustments(currentImage, brightness, contrast, saturation);
             pushState({ ...imageState!, processedSrc: newSrc });
-        } catch (err) {
+            showToast("Adjustments applied", "success");
+
+            // Reset values after apply to prevent double-effect
+            setBrightness(100);
+            setContrast(100);
+            setSaturation(100);
+
+            setActiveTool(null);
+        } catch (err: any) {
+            console.error("Adjustment apply error:", err);
             showToast("Failed to apply adjustments", "error");
+            window.alert("Error applying adjustments: " + err.message);
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -751,34 +976,43 @@ export function Editor() {
         }
     };
 
-    // Blur handler
-    const handleApplyBlur = async () => {
-        if (!currentImage || blurAmount === 0) return;
+    // Unified Blur/Sharpen handler
+    const handleApplyBlurSharpen = async () => {
+        // If we already have a preview, just commit it to avoid double-processing
+        if (previewSrc) {
+            pushState({ ...imageState!, processedSrc: previewSrc });
+            setPreviewSrc(null);
+            setIsProcessing(false);
+            setActiveTool(null);
+            setBlurAmount(0);
+            setSharpenAmount(0);
+            return;
+        }
+
+        const baseImage = imageState?.processedSrc || imageState?.src;
+        if (!baseImage || (blurAmount === 0 && sharpenAmount === 0)) return;
+
         setIsProcessing(true);
         try {
-            const newSrc = await applyBlur(currentImage, blurAmount);
-            pushState({ ...imageState!, processedSrc: newSrc });
+            let processedSrc = baseImage;
+
+            // Apply Blur if needed
+            if (blurAmount > 0) {
+                processedSrc = await applyBlur(processedSrc, blurAmount);
+            }
+
+            // Apply Sharpen if needed
+            if (sharpenAmount > 0) {
+                processedSrc = await applySharpen(processedSrc, sharpenAmount / 100);
+            }
+
+            pushState({ ...imageState!, processedSrc });
         } catch (err) {
-            showToast("Failed to apply blur", "error");
+            showToast("Failed to apply effects", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
             setBlurAmount(0);
-        }
-    };
-
-    // Sharpen handler
-    const handleApplySharpen = async () => {
-        if (!currentImage) return;
-        setIsProcessing(true);
-        try {
-            const newSrc = await applySharpen(currentImage, sharpenAmount / 100);
-            pushState({ ...imageState!, processedSrc: newSrc });
-        } catch (err) {
-            showToast("Failed to sharpen", "error");
-        } finally {
-            setIsProcessing(false);
-            setActiveTool(null);
             setSharpenAmount(0);
         }
     };
@@ -800,6 +1034,95 @@ export function Editor() {
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
+        }
+    };
+
+    const handleGenerateQR = async () => {
+        let textToEncode = qrText;
+
+        if (qrType === 'wifi') {
+            textToEncode = formatWifi(qrData);
+        } else if (qrType === 'contact') {
+            textToEncode = formatVCard(qrData);
+        } else if (qrType === 'sms') {
+            textToEncode = formatSms(qrData);
+        } else if (qrType === 'email') {
+            textToEncode = formatEmail(qrData);
+        } else if (qrType === 'phone') {
+            textToEncode = formatPhone(qrData.phone);
+        } else if (qrType === 'geo') {
+            textToEncode = formatGeo(qrData);
+        }
+
+        if (!textToEncode) return;
+
+        try {
+            const src = await generateQRCode(textToEncode);
+            setQrCodeSrc(src);
+            // Default position center
+            if (imageRef.current) {
+                setQrPosition({
+                    x: (imageRef.current.naturalWidth / 2) - 100,
+                    y: (imageRef.current.naturalHeight / 2) - 100
+                });
+            }
+        } catch (e) {
+            showToast("Failed to generate QR Code", "error");
+        }
+    };
+
+    const handleApplySticker = async () => {
+        if (!activeSticker || !currentImage) return;
+        setIsProcessing(true);
+        try {
+            const processed = await overlayImage(
+                currentImage,
+                activeSticker,
+                stickerPos.x,
+                stickerPos.y,
+                stickerSize,
+                stickerSize
+            );
+            // Create history entry
+            pushState({ ...imageState!, processedSrc: processed });
+            setActiveSticker(null);
+            setActiveTool(null);
+            showToast("Sticker applied successfully", "success");
+        } catch (err) {
+            showToast("Failed to apply sticker", "error");
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleSelectSticker = (emoji: string) => {
+        const dataUrl = emojiToDataURL(emoji, 300);
+        setActiveSticker(dataUrl);
+        // Reset size to default
+        setStickerSize(200);
+        if (imageRef.current) {
+            setStickerPos({
+                x: (imageRef.current.naturalWidth / 2) - 100,
+                y: (imageRef.current.naturalHeight / 2) - 100
+            });
+        }
+    };
+
+    const handleApplyQR = async () => {
+        if (!currentImage || !qrCodeSrc) return;
+        setIsProcessing(true);
+        try {
+            const newSrc = await overlayImage(currentImage, qrCodeSrc, qrPosition.x, qrPosition.y, qrSize, qrSize);
+            pushState({ ...imageState!, processedSrc: newSrc });
+            // Reset
+            setQrCodeSrc(null);
+            setQrText("");
+            setActiveTool(null);
+        } catch (e) {
+            console.error(e);
+            showToast("Failed to apply QR Code", "error");
+        } finally {
+            setIsProcessing(false);
         }
     };
 
@@ -1021,52 +1344,55 @@ export function Editor() {
                         {/* Group: Essentials */}
                         <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Essentials</h3>
-                            <ToolButton active={activeTool === "crop"} onClick={() => setActiveTool("crop")} icon={<CropIcon />} label="Crop & Resize" disabled={!imageState} />
-                            <ToolButton active={activeTool === "hand"} onClick={() => setActiveTool("hand")} icon={<Hand />} label="Pan Tool" disabled={!imageState} />
-                            <ToolButton active={activeTool === "id-card"} onClick={() => { setActiveTool("id-card"); if (currentImage && !frontImage) setFrontImage(currentImage); }} icon={<CreditCard />} label="ID Card" disabled={!imageState} />
+                            <ToolButton active={activeTool === "crop"} onClick={() => activateTool("crop")} icon={<CropIcon />} label="Crop & Resize" disabled={!imageState} />
+                            <ToolButton active={activeTool === "hand"} onClick={() => activateTool("hand")} icon={<Hand />} label="Pan Tool" disabled={!imageState} />
+                            <ToolButton active={activeTool === "id-card"} onClick={() => { activateTool("id-card"); if (currentImage && !frontImage) setFrontImage(currentImage); }} icon={<CreditCard />} label="ID Card" disabled={!imageState} />
                         </div>
 
                         {/* Group: Adjustments */}
                         <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Adjustments</h3>
-                            <ToolButton active={activeTool === "filters"} onClick={() => setActiveTool("filters")} icon={<Palette />} label="Filters" disabled={!imageState} />
-                            <ToolButton active={activeTool === "adjust"} onClick={() => setActiveTool("adjust")} icon={<SlidersHorizontal />} label="Tune Image" disabled={!imageState} />
-                            <ToolButton active={activeTool === "blur"} onClick={() => setActiveTool("blur")} icon={<Focus />} label="Blur & Sharpen" disabled={!imageState} />
-                            <ToolButton active={activeTool === "transform"} onClick={() => setActiveTool("transform")} icon={<RotateCw />} label="Transform" disabled={!imageState} />
+                            <ToolButton active={activeTool === "filters"} onClick={() => activateTool("filters")} icon={<Palette />} label="Filters" disabled={!imageState} />
+                            <ToolButton active={activeTool === "adjust"} onClick={() => activateTool("adjust")} icon={<SlidersHorizontal />} label="Tune Image" disabled={!imageState} />
+                            <ToolButton active={activeTool === "blur"} onClick={() => activateTool("blur")} icon={<Focus />} label="Blur & Sharpen" disabled={!imageState} />
+                            <ToolButton active={activeTool === "transform"} onClick={() => activateTool("transform")} icon={<RotateCw />} label="Transform" disabled={!imageState} />
                         </div>
 
                         {/* Group: Social */}
                         <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Social</h3>
-                            <ToolButton active={activeTool === "social-filters"} onClick={() => setActiveTool("social-filters")} icon={<Filter />} label="Insta Filters" disabled={!imageState} />
+                            <ToolButton active={activeTool === "social-filters"} onClick={() => activateTool("social-filters")} icon={<Filter />} label="Insta Filters" disabled={!imageState} />
                         </div>
 
                         {/* Group: Smart Actions */}
                         <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Smart Tools</h3>
-                            <ToolButton active={activeTool === "bg-remove"} onClick={() => { setActiveTool("bg-remove"); handleBgRemove(); }} icon={<Layers />} label="Remove BG" disabled={!imageState} />
+                            <ToolButton active={activeTool === "remaster"} onClick={() => { activateTool("remaster"); handleRemaster(); }} icon={<Sparkles />} label="Remaster" disabled={!imageState} />
+                            <ToolButton active={activeTool === "bg-remove"} onClick={() => { activateTool("bg-remove"); handleBgRemove(); }} icon={<Layers />} label="Remove BG" disabled={!imageState} />
                             <ToolButton active={activeTool === "collage"} onClick={() => {
-                                setActiveTool("collage");
+                                activateTool("collage");
                                 if (currentImage && collageImages.length === 0) {
                                     setCollageImages([currentImage]);
                                     setCollageTransforms([{ zoom: 1, panX: 0, panY: 0 }]);
                                 }
                             }} icon={<LayoutGrid />} label="Collage" disabled={!imageState} />
-                            <ToolButton active={activeTool === "ocr"} onClick={handleOcr} icon={<ScanText />} label="Extract Text" disabled={!imageState} />
-                            <ToolButton active={activeTool === "redeye"} onClick={() => setActiveTool("redeye")} icon={<Eye />} label="Red-eye Fix" disabled={!imageState} />
+                            <ToolButton active={activeTool === "qr-code"} onClick={() => activateTool("qr-code")} icon={<QrCode />} label="QR Code" disabled={!imageState} />
+                            <ToolButton active={activeTool === "ocr"} onClick={() => { activateTool("ocr"); handleOcr(); }} icon={<ScanText />} label="Extract Text" disabled={!imageState} />
+                            <ToolButton active={activeTool === "redeye"} onClick={() => activateTool("redeye")} icon={<Eye />} label="Red-eye Fix" disabled={!imageState} />
                         </div>
 
                         {/* Group: Creative */}
                         <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Creative</h3>
-                            <ToolButton active={activeTool === "draw"} onClick={() => setActiveTool("draw")} icon={<Pencil />} label="Draw" disabled={!imageState} />
+                            <ToolButton active={activeTool === "draw"} onClick={() => activateTool("draw")} icon={<Pencil />} label="Draw" disabled={!imageState} />
+                            <ToolButton active={activeTool === "sticker"} onClick={() => activateTool("sticker")} icon={<StickerIcon />} label="Stickers" disabled={!imageState} />
                         </div>
 
                         {/* Group: Utilities */}
                         <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Export</h3>
-                            <ToolButton active={activeTool === "convert"} onClick={() => setActiveTool("convert")} icon={<FileType />} label="Format Convert" disabled={!imageState} />
-                            <ToolButton active={activeTool === "compress"} onClick={() => setActiveTool("compress")} icon={<Minimize2 />} label="Compress" disabled={!imageState} />
+                            <ToolButton active={activeTool === "convert"} onClick={() => activateTool("convert")} icon={<FileType />} label="Format Convert" disabled={!imageState} />
+                            <ToolButton active={activeTool === "compress"} onClick={() => activateTool("compress")} icon={<Minimize2 />} label="Compress" disabled={!imageState} />
                         </div>
 
 
@@ -1089,7 +1415,29 @@ export function Editor() {
                         </button>
                     </div>
                 )}
+                {/* Preview / Compare Controls */}
+                {(previewSrc || activeTool === 'adjust') && (
+                    <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center space-x-4">
+                        <button
+                            className={clsx(
+                                "px-4 py-2 rounded-full font-medium text-sm shadow-lg transition-all",
+                                isComparing
+                                    ? "bg-white text-black"
+                                    : "bg-black/60 text-white border border-white/20 backdrop-blur-md hover:bg-black/80"
+                            )}
+                            onMouseDown={() => setIsComparing(true)}
+                            // Use window mouseup to ensure release even if cursor moves off button
+                            onMouseUp={() => setIsComparing(false)}
+                            onMouseLeave={() => setIsComparing(false)}
+                            onTouchStart={() => setIsComparing(true)}
+                            onTouchEnd={() => setIsComparing(false)}
+                        >
+                            {isComparing ? "Original" : "Hold to Compare"}
+                        </button>
 
+
+                    </div>
+                )}
                 {!imageState ? (
                     <div
                         {...getRootProps()}
@@ -1151,7 +1499,7 @@ export function Editor() {
                         ) : (
                             <div
                                 className={clsx(
-                                    "relative transition-transform duration-75 ease-linear will-change-transform w-full h-full flex items-center justify-center",
+                                    "relative inline-flex items-center justify-center transition-transform duration-75 ease-linear will-change-transform w-full h-full",
                                     activeTool === "hand" ? (isPanning ? "cursor-grabbing" : "cursor-grab") : ""
                                 )}
                                 style={{
@@ -1193,6 +1541,149 @@ export function Editor() {
                                         }}
                                     />
                                     {/* Overlay canvases need to be inside the transformed container to rotate/scale with it */}
+
+                                    {/* QR Code Overlay */}
+                                    {activeTool === "qr-code" && qrCodeSrc && (
+                                        <div
+                                            className="absolute cursor-move border-2 border-dashed border-teal-400"
+                                            style={{
+                                                left: qrPosition.x * imageScale,
+                                                top: qrPosition.y * imageScale,
+                                                width: qrSize * imageScale,
+                                                height: qrSize * imageScale,
+                                                backgroundImage: `url(${qrCodeSrc})`,
+                                                backgroundSize: 'contain',
+                                                backgroundRepeat: 'no-repeat'
+                                            }}
+                                            onMouseDown={(e) => {
+                                                e.stopPropagation(); // Prevent panning
+                                                const startX = e.clientX;
+                                                const startY = e.clientY;
+                                                const startPos = { ...qrPosition };
+
+                                                const handleMove = (moveEvent: MouseEvent) => {
+                                                    const dx = (moveEvent.clientX - startX) / imageScale;
+                                                    const dy = (moveEvent.clientY - startY) / imageScale;
+                                                    setQrPosition({
+                                                        x: startPos.x + dx,
+                                                        y: startPos.y + dy
+                                                    });
+                                                };
+
+                                                const handleUp = () => {
+                                                    document.removeEventListener('mousemove', handleMove);
+                                                    document.removeEventListener('mouseup', handleUp);
+                                                };
+
+                                                document.addEventListener('mousemove', handleMove);
+                                                document.addEventListener('mouseup', handleUp);
+                                            }}
+                                        >
+                                            {/* Resize Handle */}
+                                            <div
+                                                className="absolute bottom-0 right-0 w-4 h-4 bg-teal-400 rounded-full translate-x-1/2 translate-y-1/2 cursor-nwse-resize"
+                                                onMouseDown={(e) => {
+                                                    e.stopPropagation();
+                                                    const startX = e.clientX;
+                                                    const startSize = qrSize;
+
+                                                    const handleResize = (moveEvent: MouseEvent) => {
+                                                        const d = (moveEvent.clientX - startX) / imageScale;
+                                                        setQrSize(Math.max(50, startSize + d));
+                                                    };
+
+                                                    const handleUp = () => {
+                                                        document.removeEventListener('mousemove', handleResize);
+                                                        document.removeEventListener('mouseup', handleUp);
+                                                    };
+
+                                                    document.addEventListener('mousemove', handleResize);
+                                                    document.addEventListener('mouseup', handleUp);
+                                                }}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Sticker Overlay */}
+                                    {activeTool === "sticker" && activeSticker && imageRef.current && (
+                                        <>
+                                            <img
+                                                src={activeSticker}
+                                                alt="sticker-overlay"
+                                                className="absolute select-none cursor-move"
+                                                style={{
+                                                    left: `${(stickerPos.x / imageRef.current.naturalWidth) * 100}%`,
+                                                    top: `${(stickerPos.y / imageRef.current.naturalHeight) * 100}%`,
+                                                    width: `${(stickerSize / imageRef.current.naturalWidth) * 100}%`,
+                                                    zIndex: 30,
+                                                    transform: 'translate(0, 0)',
+                                                    opacity: 0.9
+                                                }}
+                                                onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation(); // Prevent panning
+                                                    const startX = e.clientX;
+                                                    const startY = e.clientY;
+                                                    const startPosX = stickerPos.x;
+                                                    const startPosY = stickerPos.y;
+
+                                                    const handleMouseMove = (moveEvent: MouseEvent) => {
+                                                        if (!imageRef.current) return;
+                                                        const scaleX = imageRef.current.naturalWidth / imageRef.current.offsetWidth;
+                                                        const scaleY = imageRef.current.naturalHeight / imageRef.current.offsetHeight;
+
+                                                        const deltaX = (moveEvent.clientX - startX) * scaleX;
+                                                        const deltaY = (moveEvent.clientY - startY) * scaleY;
+
+                                                        setStickerPos({
+                                                            x: startPosX + deltaX,
+                                                            y: startPosY + deltaY
+                                                        });
+                                                    };
+
+                                                    const handleMouseUp = () => {
+                                                        document.removeEventListener('mousemove', handleMouseMove);
+                                                        document.removeEventListener('mouseup', handleMouseUp);
+                                                    };
+
+                                                    document.addEventListener('mousemove', handleMouseMove);
+                                                    document.addEventListener('mouseup', handleMouseUp);
+                                                }}
+                                            />
+
+                                            {/* Resize Handle for Sticker */}
+                                            <div
+                                                className="absolute w-4 h-4 bg-teal-500 rounded-full border-2 border-white cursor-se-resize z-40"
+                                                style={{
+                                                    left: `${((stickerPos.x + stickerSize) / imageRef.current.naturalWidth) * 100}%`,
+                                                    top: `${((stickerPos.y + stickerSize) / imageRef.current.naturalHeight) * 100}%`,
+                                                    transform: 'translate(-50%, -50%)'
+                                                }}
+                                                onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    const startX = e.clientX;
+                                                    const startWidth = stickerSize;
+
+                                                    const handleResizeMove = (moveEvent: MouseEvent) => {
+                                                        if (!imageRef.current) return;
+                                                        const scale = imageRef.current.naturalWidth / imageRef.current.offsetWidth;
+                                                        const delta = (moveEvent.clientX - startX) * scale;
+                                                        const newSize = Math.max(50, startWidth + delta);
+                                                        setStickerSize(newSize);
+                                                    };
+
+                                                    const handleResizeUp = () => {
+                                                        document.removeEventListener('mousemove', handleResizeMove);
+                                                        document.removeEventListener('mouseup', handleResizeUp);
+                                                    };
+
+                                                    document.addEventListener('mousemove', handleResizeMove);
+                                                    document.addEventListener('mouseup', handleResizeUp);
+                                                }}
+                                            />
+                                        </>
+                                    )}
                                     {activeTool === "draw" && (
                                         <>
                                             <canvas
@@ -1247,80 +1738,110 @@ export function Editor() {
                             </div>
                         )}
                     </div>
-                )}
+                )
+                }
 
-                {isProcessing && (
-                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                        <div className="flex flex-col items-center">
-                            <Wand2 className="h-8 w-8 text-white animate-spin mb-2" />
-                            <p className="text-white font-medium mb-3">Processing...</p>
-                            {(activeTool === 'bg-remove' || activeTool === 'ocr') && (
-                                <button
-                                    onClick={() => {
-                                        if (activeTool === 'bg-remove') cancelBgRemoval();
-                                        if (activeTool === 'ocr') cancelOcr();
-                                        setIsProcessing(false);
-                                        setActiveTool(null);
-                                    }}
-                                    className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                            )}
+                {
+                    isProcessing && (
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                            <div className="flex flex-col items-center">
+                                <Wand2 className="h-8 w-8 text-white animate-spin mb-2" />
+                                <p className="text-white font-medium mb-3">Processing...</p>
+                                {(activeTool === 'bg-remove' || activeTool === 'ocr') && (
+                                    <button
+                                        onClick={() => {
+                                            if (activeTool === 'bg-remove') cancelBgRemoval();
+                                            if (activeTool === 'ocr') cancelOcr();
+                                            setIsProcessing(false);
+                                            setActiveTool(null);
+                                        }}
+                                        className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                )}
+                            </div>
                         </div>
-                    </div>
-                )}
+                    )
+                }
 
-                {imageState && (
-                    <div className="absolute top-4 right-4 flex gap-2 z-40">
-                        <button
-                            onClick={undo}
-                            disabled={!canUndo}
-                            className="w-10 h-10 flex items-center justify-center rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-white hover:bg-white/10 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Undo"
-                        >
-                            <Undo className="h-5 w-5" />
-                        </button>
-                        <button
-                            onClick={redo}
-                            disabled={!canRedo}
-                            className="w-10 h-10 flex items-center justify-center rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-white hover:bg-white/10 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Redo"
-                        >
-                            <Redo className="h-5 w-5" />
-                        </button>
+                {
+                    imageState && (
+                        <div className="absolute top-4 right-4 flex gap-2 z-40">
+                            <button
+                                onClick={undo}
+                                disabled={!canUndo}
+                                className="w-10 h-10 flex items-center justify-center rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-white hover:bg-white/10 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Undo"
+                            >
+                                <Undo className="h-5 w-5" />
+                            </button>
+                            <button
+                                onClick={redo}
+                                disabled={!canRedo}
+                                className="w-10 h-10 flex items-center justify-center rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-white hover:bg-white/10 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Redo"
+                            >
+                                <Redo className="h-5 w-5" />
+                            </button>
 
-                        <div className="w-px h-10 bg-white/10 mx-1" />
+                            <div className="w-px h-10 bg-white/10 mx-1" />
 
-                        <button
-                            onClick={handleSave}
-                            disabled={isSaving}
-                            className="w-10 h-10 flex items-center justify-center rounded-full bg-teal-500 text-white hover:bg-teal-600 transition-colors shadow-lg disabled:opacity-50"
-                            title="Save Project"
-                        >
-                            {isSaving ? <Wand2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
-                        </button>
-                        <button
-                            onClick={handleDownload}
-                            className="w-10 h-10 flex items-center justify-center rounded-full bg-white text-black hover:bg-slate-200 transition-colors shadow-lg"
-                            title="Download"
-                        >
-                            <Download className="h-5 w-5" />
-                        </button>
-                        <button
-                            onClick={() => {
-                                pushState(null);
-                                // Clear URL parameter when closing
-                                router.push('/editor');
-                            }}
-                            className="w-10 h-10 flex items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 backdrop-blur-md transition-colors shadow-lg"
-                            title="Close / Reset"
-                        >
-                            <X className="h-5 w-5" />
-                        </button>
-                    </div>
-                )}
-            </main>
+                            <button
+                                onClick={handleSave}
+                                disabled={isSaving}
+                                className="w-10 h-10 flex items-center justify-center rounded-full bg-teal-500 text-white hover:bg-teal-600 transition-colors shadow-lg disabled:opacity-50"
+                                title="Save Project"
+                            >
+                                {isSaving ? <Wand2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+                            </button>
+                            <button
+                                onClick={handleDownload}
+                                className="w-10 h-10 flex items-center justify-center rounded-full bg-white text-black hover:bg-slate-200 transition-colors shadow-lg"
+                                title="Download"
+                            >
+                                <Download className="h-5 w-5" />
+                            </button>
+                            <button
+                                onClick={() => {
+                                    pushState(null);
+                                    // Reset local state
+                                    setActiveTool(null);
+                                    setCrop(undefined);
+                                    setCompletedCrop(undefined);
+                                    setZoom(1);
+                                    setViewZoom(100);
+                                    setPan({ x: 0, y: 0 });
+                                    setExtractedText("");
+                                    setFrontImage(null);
+                                    setBackImage(null);
+                                    setQrCodeSrc(null);
+                                    setActiveSticker(null);
+                                    setPreviewSrc(null);
+                                    setIsComparing(false);
+                                    setCompareSnapshot(null);
+
+                                    // Reset effect values
+                                    setSelectedFilter('none');
+                                    setBlurAmount(0);
+                                    setSharpenAmount(0);
+                                    setBrightness(100);
+                                    setContrast(100);
+                                    setSaturation(100);
+                                    setRotation(0);
+
+                                    // Clear URL parameter when closing
+                                    router.push('/editor');
+                                }}
+                                className="w-10 h-10 flex items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 backdrop-blur-md transition-colors shadow-lg"
+                                title="Close / Reset"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                    )
+                }
+            </main >
 
 
 
@@ -1352,16 +1873,14 @@ export function Editor() {
                                                                             activeTool === "draw" ? "Draw" :
                                                                                 activeTool === "social-filters" ? "Instagram Filters" :
                                                                                     activeTool === "collage" ? "Collage Maker" :
-                                                                                        activeTool === "hand" ? "Pan Tool" :
-                                                                                            activeTool === "bg-remove" ? "Background Removal" :
-                                                                                                "ID Card A4 Layout"}
+                                                                                        activeTool === "qr-code" ? "QR Code Generator" :
+                                                                                            activeTool === "hand" ? "Pan Tool" :
+                                                                                                activeTool === "bg-remove" ? "Background Removal" :
+                                                                                                    activeTool === "sticker" ? "Sticker Library" :
+                                                                                                        activeTool === "id-card" ? "ID Card A4 Layout" :
+                                                                                                            "Settings"}
                                     </h3>
-                                    <button
-                                        onClick={() => setActiveTool(null)}
-                                        className="text-slate-400 hover:text-white"
-                                    >
-                                        <X className="h-4 w-4" />
-                                    </button>
+
                                 </div>
 
                                 {activeTool === "hand" && (
@@ -1462,9 +1981,13 @@ export function Editor() {
                                             </button>
                                         )}
 
-                                        <button onClick={handleCreateIDCard} disabled={!frontImage || !backImage} className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
-                                            <CreditCard className="h-4 w-4" />
-                                            Apply
+                                        <button
+                                            onClick={handleCreateIDCard}
+                                            disabled={!frontImage || !backImage}
+                                            className="h-10 w-10 mx-auto rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                            title="Apply ID Card"
+                                        >
+                                            <Check className="h-5 w-5" />
                                         </button>
                                     </div>
                                 )}
@@ -1473,10 +1996,15 @@ export function Editor() {
                                     activeTool === "crop" && (
                                         <div className="space-y-4">
                                             <p className="text-xs text-slate-400 mb-2">Drag on the image to select crop area.</p>
-                                            <button onClick={handleCrop} className="w-full btn-primary">
-                                                <CropIcon className="h-4 w-4" />
-                                                Apply
-                                            </button>
+                                            <div className="flex justify-center">
+                                                <button
+                                                    onClick={handleCrop}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                    title="Apply Crop"
+                                                >
+                                                    <Check className="h-5 w-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 }
@@ -1498,10 +2026,15 @@ export function Editor() {
                                                     <option value="pdf">PDF (Download)</option>
                                                 </select>
                                             </div>
-                                            <button onClick={() => handleConvert(selectedFormat)} className="w-full btn-primary">
-                                                <Download className="h-4 w-4" />
-                                                Apply
-                                            </button>
+                                            <div className="flex justify-center">
+                                                <button
+                                                    onClick={() => handleConvert(selectedFormat)}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                    title="Convert"
+                                                >
+                                                    <Check className="h-5 w-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 }
@@ -1550,10 +2083,15 @@ export function Editor() {
                                                 />
                                                 <p className="text-[10px] text-slate-500 mt-1">Lower quality = smaller file size</p>
                                             </div>
-                                            <button onClick={handleCompress} className="w-full btn-primary">
-                                                <Minimize2 className="h-4 w-4" />
-                                                Apply
-                                            </button>
+                                            <div className="flex justify-center">
+                                                <button
+                                                    onClick={handleCompress}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                    title="Compress"
+                                                >
+                                                    <Check className="h-5 w-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 }
@@ -1578,7 +2116,15 @@ export function Editor() {
                                                     </button>
                                                 ))}
                                             </div>
-                                            <button onClick={handleApplyFilter} className="w-full btn-primary">Apply Filter</button>
+                                            <div className="flex justify-center pt-2">
+                                                <button
+                                                    onClick={applyPreview}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                    title="Apply Filter"
+                                                >
+                                                    <Check className="h-5 w-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 }
@@ -1603,7 +2149,15 @@ export function Editor() {
                                                     </button>
                                                 ))}
                                             </div>
-                                            <button onClick={handleApplyFilter} className="w-full btn-primary">Apply</button>
+                                            <div className="flex justify-center pt-2">
+                                                <button
+                                                    onClick={applyPreview}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                    title="Apply Filter"
+                                                >
+                                                    <Check className="h-5 w-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 }
@@ -1638,10 +2192,15 @@ export function Editor() {
                                                     onChange={(e) => setSaturation(parseInt(e.target.value))}
                                                 />
                                             </div>
-                                            <button onClick={handleApplyAdjustments} className="w-full btn-primary">
-                                                <Sliders className="h-4 w-4" />
-                                                Apply
-                                            </button>
+                                            <div className="flex justify-center">
+                                                <button
+                                                    onClick={handleApplyAdjustments}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                    title="Apply Adjustments"
+                                                >
+                                                    <Check className="h-5 w-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 }
@@ -1663,13 +2222,15 @@ export function Editor() {
                                                 />
                                             </div>
                                             {rotation !== 0 && (
-                                                <button
-                                                    onClick={() => handleRotate(rotation)}
-                                                    className="w-full btn-primary mt-2"
-                                                >
-                                                    <RotateCw className="h-4 w-4" />
-                                                    Apply
-                                                </button>
+                                                <div className="flex justify-center mt-2">
+                                                    <button
+                                                        onClick={() => handleRotate(rotation)}
+                                                        className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                        title="Apply Rotation"
+                                                    >
+                                                        <Check className="h-5 w-5" />
+                                                    </button>
+                                                </div>
                                             )}
 
                                             <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-4">
@@ -1708,10 +2269,6 @@ export function Editor() {
                                                     onChange={(e) => setBlurAmount(parseInt(e.target.value))}
                                                 />
                                             </div>
-                                            <button onClick={handleApplyBlur} disabled={blurAmount === 0} className="w-full btn-primary disabled:opacity-50">
-                                                <Droplets className="h-4 w-4" />
-                                                Apply
-                                            </button>
                                             <div className="border-t border-white/10 pt-4">
                                                 <Slider
                                                     label="Sharpen Amount"
@@ -1722,10 +2279,16 @@ export function Editor() {
                                                     onChange={(e) => setSharpenAmount(parseInt(e.target.value))}
                                                 />
                                             </div>
-                                            <button onClick={handleApplySharpen} disabled={sharpenAmount === 0} className="w-full btn-secondary disabled:opacity-50">
-                                                <Zap className="h-4 w-4" />
-                                                Apply
-                                            </button>
+                                            <div className="flex justify-center pt-4">
+                                                <button
+                                                    onClick={handleApplyBlurSharpen}
+                                                    disabled={blurAmount === 0 && sharpenAmount === 0}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all disabled:opacity-50"
+                                                    title="Apply Changes"
+                                                >
+                                                    <Check className="h-5 w-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 }
@@ -1737,7 +2300,15 @@ export function Editor() {
                                             <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
                                                 <p className="text-xs text-yellow-400">Note: This is a simplified fix that targets the upper-center area where faces typically appear.</p>
                                             </div>
-                                            <button onClick={handleRedEyeFix} className="w-full btn-primary">Fix Red-eye</button>
+                                            <div className="flex justify-center">
+                                                <button
+                                                    onClick={handleRedEyeFix}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                    title="Fix Red-eye"
+                                                >
+                                                    <Eye className="h-5 w-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 }
@@ -1877,12 +2448,13 @@ export function Editor() {
 
                                             {/* Actions */}
                                             {collageImages.length >= 2 && (
-                                                <div className="flex gap-2">
+                                                <div className="flex gap-4 justify-center">
                                                     <button
                                                         onClick={() => setCollageImages(prev => [...prev].sort(() => Math.random() - 0.5))}
-                                                        className="flex-1 btn-secondary flex items-center justify-center gap-2"
+                                                        className="h-10 w-10 rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-white/10 flex items-center justify-center transition-all"
+                                                        title="Shuffle"
                                                     >
-                                                        <Shuffle className="h-4 w-4" /> Shuffle
+                                                        <Shuffle className="h-5 w-5" />
                                                     </button>
                                                     <button
                                                         onClick={() => {
@@ -1895,10 +2467,264 @@ export function Editor() {
                                                             }
                                                         }}
                                                         disabled={!previewSrc}
-                                                        className="flex-1 btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
+                                                        className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all disabled:opacity-50"
+                                                        title="Apply Collage"
                                                     >
-                                                        <Check className="h-4 w-4" /> Apply
+                                                        <Check className="h-5 w-5" />
                                                     </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                }
+
+                                {
+                                    activeTool === "qr-code" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Generate a QR Code and place it on your image.</p>
+
+                                            <div className="space-y-2">
+                                                <label className="text-xs text-slate-400">Type</label>
+                                                <select
+                                                    value={qrType}
+                                                    onChange={(e) => {
+                                                        setQrType(e.target.value as any);
+                                                        setQrData({});
+                                                        setQrText("");
+                                                    }}
+                                                    className="w-full bg-slate-950 border border-white/10 rounded-lg p-2 text-sm text-slate-300 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 hover:border-teal-500/50 transition-colors"
+                                                >
+                                                    <option value="text" className="bg-slate-950">Text</option>
+                                                    <option value="url" className="bg-slate-950">URL</option>
+                                                    <option value="wifi" className="bg-slate-950">WiFi Network</option>
+                                                    <option value="contact" className="bg-slate-950">Contact (vCard)</option>
+                                                    <option value="phone" className="bg-slate-950">Phone Number</option>
+                                                    <option value="email" className="bg-slate-950">Email</option>
+                                                    <option value="sms" className="bg-slate-950">SMS</option>
+                                                    <option value="geo" className="bg-slate-950">Location</option>
+                                                </select>
+                                            </div>
+
+                                            {(qrType === 'text' || qrType === 'url') && (
+                                                <div className="space-y-2">
+                                                    <label className="text-xs text-slate-400">Content</label>
+                                                    <input
+                                                        type="text"
+                                                        value={qrText}
+                                                        onChange={(e) => setQrText(e.target.value)}
+                                                        placeholder={qrType === 'url' ? "https://example.com" : "Enter text here"}
+                                                        className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300 focus:outline-none focus:border-white/50"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            {qrType === 'wifi' && (
+                                                <div className="space-y-2">
+                                                    <input
+                                                        type="text" placeholder="SSID (Network Name)"
+                                                        value={qrData.ssid || ''}
+                                                        onChange={e => setQrData({ ...qrData, ssid: e.target.value })}
+                                                        className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300 mb-2"
+                                                    />
+                                                    <input
+                                                        type="text" placeholder="Password"
+                                                        value={qrData.password || ''}
+                                                        onChange={e => setQrData({ ...qrData, password: e.target.value })}
+                                                        className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300 mb-2"
+                                                    />
+                                                    <select
+                                                        value={qrData.encryption || 'WPA'}
+                                                        onChange={e => setQrData({ ...qrData, encryption: e.target.value })}
+                                                        className="w-full bg-slate-950 border border-white/10 rounded-lg p-2 text-sm text-slate-300 mb-2 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 hover:border-teal-500/50 transition-colors"
+                                                    >
+                                                        <option value="WPA" className="bg-slate-950">WPA/WPA2</option>
+                                                        <option value="WEP" className="bg-slate-950">WEP</option>
+                                                        <option value="nopass" className="bg-slate-950">No Encryption</option>
+                                                    </select>
+                                                    <label className="flex items-center space-x-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={qrData.hidden || false}
+                                                            onChange={e => setQrData({ ...qrData, hidden: e.target.checked })}
+                                                            className="rounded border-white/10 bg-black/40 text-teal-500 focus:ring-teal-500"
+                                                        />
+                                                        <span className="text-xs text-slate-400">Hidden Community</span>
+                                                    </label>
+                                                </div>
+                                            )}
+
+                                            {qrType === 'contact' && (
+                                                <div className="space-y-2">
+                                                    <input type="text" placeholder="Full Name" value={qrData.name || ''} onChange={e => setQrData({ ...qrData, name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <input type="text" placeholder="Phone" value={qrData.phone || ''} onChange={e => setQrData({ ...qrData, phone: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <input type="email" placeholder="Email" value={qrData.email || ''} onChange={e => setQrData({ ...qrData, email: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <input type="text" placeholder="Organization" value={qrData.org || ''} onChange={e => setQrData({ ...qrData, org: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <input type="text" placeholder="Job Title" value={qrData.title || ''} onChange={e => setQrData({ ...qrData, title: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <input type="text" placeholder="Website" value={qrData.url || ''} onChange={e => setQrData({ ...qrData, url: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                </div>
+                                            )}
+
+                                            {qrType === 'phone' && (
+                                                <div className="space-y-2">
+                                                    <input type="tel" placeholder="Phone Number" value={qrData.phone || ''} onChange={e => setQrData({ ...qrData, phone: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                </div>
+                                            )}
+
+                                            {qrType === 'sms' && (
+                                                <div className="space-y-2">
+                                                    <input type="tel" placeholder="Phone Number" value={qrData.phone || ''} onChange={e => setQrData({ ...qrData, phone: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <textarea placeholder="Message" value={qrData.message || ''} onChange={e => setQrData({ ...qrData, message: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300 resize-none h-20" />
+                                                </div>
+                                            )}
+
+                                            {qrType === 'email' && (
+                                                <div className="space-y-2">
+                                                    <input type="email" placeholder="Email Address" value={qrData.email || ''} onChange={e => setQrData({ ...qrData, email: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <input type="text" placeholder="Subject" value={qrData.subject || ''} onChange={e => setQrData({ ...qrData, subject: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <textarea placeholder="Body" value={qrData.body || ''} onChange={e => setQrData({ ...qrData, body: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300 resize-none h-20" />
+                                                </div>
+                                            )}
+
+                                            {qrType === 'geo' && (
+                                                <div className="space-y-2 flex gap-2">
+                                                    <input type="text" placeholder="Latitude" value={qrData.lat || ''} onChange={e => setQrData({ ...qrData, lat: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                    <input type="text" placeholder="Longitude" value={qrData.long || ''} onChange={e => setQrData({ ...qrData, long: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-slate-300" />
+                                                </div>
+                                            )}
+
+                                            <button
+                                                onClick={handleGenerateQR}
+                                                className="w-full btn-secondary disabled:opacity-50"
+                                            >
+                                                Generate QR
+                                            </button>
+
+                                            {qrCodeSrc && (
+                                                <div className="border-t border-white/10 pt-4 space-y-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-xs text-slate-400">Size</label>
+                                                        <Slider
+                                                            label=""
+                                                            valueDisplay={`${Math.round(qrSize)}px`}
+                                                            min={50}
+                                                            max={1000}
+                                                            value={qrSize}
+                                                            onChange={(e) => setQrSize(parseInt(e.target.value))}
+                                                        />
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <label className="text-xs text-slate-400">Position X</label>
+                                                        <Slider
+                                                            label=""
+                                                            valueDisplay={`${Math.round(qrPosition.x)}px`}
+                                                            min={0}
+                                                            max={imageRef.current?.naturalWidth || 1000}
+                                                            value={qrPosition.x}
+                                                            onChange={(e) => setQrPosition(prev => ({ ...prev, x: parseInt(e.target.value) }))}
+                                                        />
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <label className="text-xs text-slate-400">Position Y</label>
+                                                        <Slider
+                                                            label=""
+                                                            valueDisplay={`${Math.round(qrPosition.y)}px`}
+                                                            min={0}
+                                                            max={imageRef.current?.naturalHeight || 1000}
+                                                            value={qrPosition.y}
+                                                            onChange={(e) => setQrPosition(prev => ({ ...prev, y: parseInt(e.target.value) }))}
+                                                        />
+                                                    </div>
+
+                                                    <div className="flex gap-4 pt-2 justify-center">
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); setQrCodeSrc(null); }}
+                                                            className="h-10 w-10 rounded-full bg-slate-800 text-slate-400 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 border border-white/10 flex items-center justify-center transition-all shadow-lg"
+                                                            title="Cancel"
+                                                        >
+                                                            <X className="h-5 w-5" />
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleApplyQR(); }}
+                                                            className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                            title="Apply"
+                                                        >
+                                                            <Check className="h-5 w-5" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                }
+
+                                {
+                                    activeTool === "sticker" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Choose a sticker to add to your image.</p>
+
+                                            {/* Categories */}
+                                            <div className="flex overflow-x-auto gap-2 pb-2 scrollbar-hide">
+                                                {STICKER_CATEGORIES.map(cat => (
+                                                    <button
+                                                        key={cat.id}
+                                                        onClick={() => setActiveStickerTab(cat.id)}
+                                                        className={clsx(
+                                                            "px-3 py-1 text-xs rounded-full border transition-all whitespace-nowrap",
+                                                            activeStickerTab === cat.id
+                                                                ? "border-teal-400 bg-teal-500/20 text-teal-300"
+                                                                : "border-white/10 text-slate-400 hover:bg-white/5"
+                                                        )}
+                                                    >
+                                                        {cat.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {/* Sticker Grid */}
+                                            <div className="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto p-1">
+                                                {STICKER_CATEGORIES.find(c => c.id === activeStickerTab)?.items.map((item, idx) => (
+                                                    <button
+                                                        key={idx}
+                                                        onClick={() => handleSelectSticker(item)}
+                                                        className="aspect-square flex items-center justify-center text-2xl hover:bg-white/10 rounded-lg transition-colors border border-transparent hover:border-white/20"
+                                                    >
+                                                        {item}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {activeSticker && (
+                                                <div className="border-t border-white/10 pt-4 space-y-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-xs text-slate-400">Size</label>
+                                                        <Slider
+                                                            label=""
+                                                            valueDisplay={`${Math.round(stickerSize)}px`}
+                                                            min={50}
+                                                            max={1000}
+                                                            value={stickerSize}
+                                                            onChange={(e) => setStickerSize(parseInt(e.target.value))}
+                                                        />
+                                                    </div>
+
+                                                    <div className="flex gap-4 pt-2 justify-center">
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); setActiveSticker(null); }}
+                                                            className="h-10 w-10 rounded-full bg-slate-800 text-slate-400 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 border border-white/10 flex items-center justify-center transition-all shadow-lg"
+                                                            title="Cancel"
+                                                        >
+                                                            <X className="h-5 w-5" />
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleApplySticker(); }}
+                                                            className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                            title="Apply"
+                                                        >
+                                                            <Check className="h-5 w-5" />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
@@ -2000,9 +2826,22 @@ export function Editor() {
                                             )}
 
                                             {/* Action Buttons */}
-                                            <div className="flex gap-2">
-                                                <button onClick={clearDrawing} className="flex-1 btn-secondary">Clear</button>
-                                                <button onClick={applyDrawing} className="flex-1 btn-primary">Apply Drawing</button>
+                                            {/* Action Buttons */}
+                                            <div className="flex gap-4 pt-2 justify-center">
+                                                <button
+                                                    onClick={clearDrawing}
+                                                    className="h-10 w-10 rounded-full bg-slate-800 text-slate-400 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 border border-white/10 flex items-center justify-center transition-all shadow-lg"
+                                                    title="Clear Drawing"
+                                                >
+                                                    <X className="h-5 w-5" />
+                                                </button>
+                                                <button
+                                                    onClick={applyDrawing}
+                                                    className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all"
+                                                    title="Apply Drawing"
+                                                >
+                                                    <Check className="h-5 w-5" />
+                                                </button>
                                             </div>
                                         </div>
                                     )
@@ -2013,21 +2852,23 @@ export function Editor() {
                 )
             }
             {/* Custom Cursor */}
-            {activeTool === "draw" && showCursor && (
-                <div
-                    className="fixed pointer-events-none rounded-full z-[100]"
-                    style={{
-                        left: cursorPos.x,
-                        top: cursorPos.y,
-                        width: `${(brushSize * (drawingMode === 'highlighter' ? 3 : 1)) * imageScale}px`,
-                        height: `${(brushSize * (drawingMode === 'highlighter' ? 3 : 1)) * imageScale}px`,
-                        transform: 'translate(-50%, -50%)',
-                        border: '1px solid white',
-                        boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
-                        backgroundColor: 'transparent'
-                    }}
-                />
-            )}
+            {
+                activeTool === "draw" && showCursor && (
+                    <div
+                        className="fixed pointer-events-none rounded-full z-[100]"
+                        style={{
+                            left: cursorPos.x,
+                            top: cursorPos.y,
+                            width: `${(brushSize * (drawingMode === 'highlighter' ? 3 : 1)) * imageScale}px`,
+                            height: `${(brushSize * (drawingMode === 'highlighter' ? 3 : 1)) * imageScale}px`,
+                            transform: 'translate(-50%, -50%)',
+                            border: '1px solid white',
+                            boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
+                            backgroundColor: 'transparent'
+                        }}
+                    />
+                )
+            }
         </div >
     );
 }

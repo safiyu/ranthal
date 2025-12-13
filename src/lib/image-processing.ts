@@ -112,3 +112,52 @@ export async function compressImage(imageSrc: string, quality: number = 0.7): Pr
         img.src = imageSrc;
     });
 }
+
+export async function overlayImage(
+    baseImageSrc: string,
+    overlayImageSrc: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const baseImg = new Image();
+        const overlayImg = new Image();
+        baseImg.crossOrigin = "anonymous";
+        overlayImg.crossOrigin = "anonymous";
+
+        let loadedCount = 0;
+        const onImageLoad = () => {
+            loadedCount++;
+            if (loadedCount === 2) {
+                // Both images loaded
+                const canvas = document.createElement("canvas");
+                canvas.width = baseImg.width;
+                canvas.height = baseImg.height;
+                const ctx = canvas.getContext("2d");
+                if (!ctx) {
+                    reject(new Error("Canvas context failed"));
+                    return;
+                }
+
+                // Draw base image
+                ctx.drawImage(baseImg, 0, 0);
+
+                // Draw overlay image
+                ctx.drawImage(overlayImg, x, y, width, height);
+
+                resolve(canvas.toDataURL("image/png"));
+            }
+        };
+
+        baseImg.onload = onImageLoad;
+        overlayImg.onload = onImageLoad;
+
+        baseImg.onerror = () => reject(new Error("Failed to load base image"));
+        overlayImg.onerror = () => reject(new Error("Failed to load overlay image"));
+
+        baseImg.src = baseImageSrc;
+        overlayImg.src = overlayImageSrc;
+    });
+}

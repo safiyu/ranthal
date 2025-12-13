@@ -19,7 +19,8 @@ export function useHistory<T>(initialState: T) {
                 index: newHistory.length, // equivalent to index + 1
             };
         });
-    }, []);
+        console.log("useHistory: pushState completed. New history length:", state.history.length + 1);
+    }, [state.history.length]);
 
     const undo = useCallback(() => {
         setState((prev) => {

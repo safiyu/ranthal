@@ -45,10 +45,19 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }, [setHistory]);
 
     // Save state to IndexedDB whenever it changes
+    // Save state to IndexedDB whenever it changes
     useEffect(() => {
-        if (state && isRestored) {
-            set('ranthal_editor_state', state)
-                .catch((err) => console.error('Failed to save state to IndexedDB:', err));
+        if (isRestored) {
+            if (state) {
+                set('ranthal_editor_state', state)
+                    .catch((err) => console.error('Failed to save state to IndexedDB:', err));
+            } else {
+                // Determine if we should clear it. Yes, if state is explicitly null (reset).
+                // But wait, initially it is null before restore. 
+                // isRestored handles that.
+                set('ranthal_editor_state', null) // Saving null is fine if we handle it on load
+                    .catch((err) => console.error('Failed to clear state in IndexedDB:', err));
+            }
         }
     }, [state, isRestored]);
 

@@ -1,9 +1,120 @@
-// Image Effects Utility Functions
 
-type FilterName = 'grayscale' | 'sepia' | 'vintage' | 'warm' | 'cool' | 'highContrast' | 'noir' | 'fade' | 'kodak' | 'technicolor' | 'polaroid' | 'dramatic' | 'golden' | 'cyberpunk' | 'clarendon' | 'gingham' | 'juno' | 'lark' | 'ludwig' | 'valencia' | 'moon' | 'reyes' | 'slumber' | 'crema' | 'aden' | 'perpetua' | 'oldCinema' | 'retro' | 'twilight' | 'sunset' | 'forest' | 'rust';
+/**
+ * Remaster image using auto-levels (contrast), saturation boost, and sharpening
+ */
+export async function remasterImage(imageSrc: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                reject(new Error('Could not get canvas context'));
+                return;
+            }
+
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            // 1. Auto-Levels (Histogram Stretching)
+            let minR = 255, minG = 255, minB = 255;
+            let maxR = 0, maxG = 0, maxB = 0;
+
+            // Find min/max values
+            for (let i = 0; i < data.length; i += 4) {
+                minR = Math.min(minR, data[i]);
+                minG = Math.min(minG, data[i + 1]);
+                minB = Math.min(minB, data[i + 2]);
+                maxR = Math.max(maxR, data[i]);
+                maxG = Math.max(maxG, data[i + 1]);
+                maxB = Math.max(maxB, data[i + 2]);
+            }
+
+            // Apply stretching
+            for (let i = 0; i < data.length; i += 4) {
+                data[i] = (data[i] - minR) * (255 / (maxR - minR));
+                data[i + 1] = (data[i + 1] - minG) * (255 / (maxG - minG));
+                data[i + 2] = (data[i + 2] - minB) * (255 / (maxB - minB));
+            }
+
+            // 2. Saturation Boost (approx +15%)
+            const saturationScale = 1.15;
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b; // rec601 luma
+
+                data[i] = Math.min(255, Math.max(0, gray + (r - gray) * saturationScale));
+                data[i + 1] = Math.min(255, Math.max(0, gray + (g - gray) * saturationScale));
+                data[i + 2] = Math.min(255, Math.max(0, gray + (b - gray) * saturationScale));
+            }
+
+            // Put data back for sharpening
+            ctx.putImageData(imageData, 0, 0);
+
+            // 3. Smart Sharpen (Mild)
+            // We can reuse the existing applySharpen function logic or just call it if we could compose promises.
+            // But since we are already in a canvas context, let's apply a mild sharpen kernel directly here for speed.
+            // Kernel for mild sharpen:
+            //  0 -0.5  0
+            // -0.5  3 -0.5
+            //  0 -0.5  0
+            // Actually, let's use the same kernel as applySharpen but with small amount (0.5)
+            // Or simpler: just continue modifying the imageData buffer (but sharpening needs neighbors).
+            // For simplicity and to avoid implementing convolution again in same buffer (complex),
+            // let's just resolve with what we have (Auto-levels + Saturation)
+            // AND THEN chain the applySharpen from the caller?
+            // No, "Remaster" should be one-click.
+            // Let's implement a quick sharpen pass on a copy of the buffer.
+
+            const sharpAmount = 0.5;
+            const width = canvas.width;
+            const height = canvas.height;
+            const inputData = new Uint8ClampedArray(data); // Copy of current state (Levels + Saturation)
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = (y * width + x) * 4;
+
+                    // Simple sharpen kernel
+                    //  0 -1  0
+                    // -1  5 -1
+                    //  0 -1  0
+                    // Blended with original by sharpAmount
+
+                    for (let c = 0; c < 3; c++) {
+                        const val = inputData[idx + c];
+                        const up = inputData[((y - 1) * width + x) * 4 + c];
+                        const down = inputData[((y + 1) * width + x) * 4 + c];
+                        const left = inputData[(y * width + (x - 1)) * 4 + c];
+                        const right = inputData[(y * width + (x + 1)) * 4 + c];
+
+                        const laplace = val * 5 - (up + down + left + right); // This is a strong sharpen
+
+                        // Mix original with sharpened
+                        data[idx + c] = Math.min(255, Math.max(0, val + (laplace - val) * sharpAmount));
+                    }
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = imageSrc;
+    });
+}
+
+type FilterName = 'none' | 'grayscale' | 'sepia' | 'vintage' | 'warm' | 'cool' | 'highContrast' | 'noir' | 'fade' | 'kodak' | 'technicolor' | 'polaroid' | 'dramatic' | 'golden' | 'cyberpunk' | 'clarendon' | 'gingham' | 'juno' | 'lark' | 'ludwig' | 'valencia' | 'moon' | 'reyes' | 'slumber' | 'crema' | 'aden' | 'perpetua' | 'oldCinema' | 'retro' | 'twilight' | 'sunset' | 'forest' | 'rust';
 
 // Preset filter definitions
 export const FILTER_PRESETS: Record<FilterName, string> = {
+    none: 'none',
     grayscale: 'grayscale(100%)',
     sepia: 'sepia(100%)',
     vintage: 'sepia(50%) contrast(90%) brightness(90%)',
@@ -32,7 +143,7 @@ export const FILTER_PRESETS: Record<FilterName, string> = {
     perpetua: 'contrast(110%) brightness(110%) saturate(110%)',
     oldCinema: 'grayscale(90%) contrast(160%) brightness(85%) sepia(20%)',
     retro: 'sepia(40%) saturate(140%) contrast(110%) brightness(95%)',
-    twilight: 'brightness(90%) contrast(120%) saturate(120%) hue-rotate(200deg)',
+    twilight: 'sepia(40%) hue-rotate(180deg) saturate(140%) contrast(110%)',
     sunset: 'sepia(30%) saturate(160%) hue-rotate(-10deg) contrast(110%)',
     forest: 'sepia(20%) brightness(95%) contrast(110%) saturate(120%) hue-rotate(60deg)',
     rust: 'sepia(50%) saturate(150%) contrast(130%) hue-rotate(-20deg)',
@@ -54,7 +165,13 @@ export async function applyFilter(imageSrc: string, filterName: FilterName): Pro
                 reject(new Error('Could not get canvas context'));
                 return;
             }
-            ctx.filter = FILTER_PRESETS[filterName];
+
+            if (filterName !== 'none' && FILTER_PRESETS[filterName]) {
+                ctx.filter = FILTER_PRESETS[filterName];
+            } else {
+                ctx.filter = 'none';
+            }
+
             ctx.drawImage(img, 0, 0);
             resolve(canvas.toDataURL('image/png'));
         };
