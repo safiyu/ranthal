@@ -1077,17 +1077,9 @@ export function Editor() {
             {/* Main Canvas Area */}
             <main className="flex-1 relative overflow-hidden flex items-center justify-center p-4 lg:p-8 m-4 rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)]/30 backdrop-blur-sm shadow-inner min-h-[50vh] lg:h-[calc(100vh-8rem)] order-1 lg:order-2">
 
-                {/* Top Toolbar (Undo/Redo/Zoom) */}
+                {/* Bottom Toolbar (Zoom Only) */}
                 {imageState && (
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 z-40 bg-black/80 backdrop-blur-md rounded-full px-4 py-2 border border-white/10 w-max max-w-[90%] overflow-x-auto">
-                        <button onClick={undo} disabled={!canUndo} className="p-2 rounded-full hover:bg-white/10 text-white disabled:opacity-30 transition-colors" title="Undo">
-                            <Undo className="h-4 w-4" />
-                        </button>
-                        <div className="w-px h-4 bg-white/20 shrink-0" />
-                        <button onClick={redo} disabled={!canRedo} className="p-2 rounded-full hover:bg-white/10 text-white disabled:opacity-30 transition-colors" title="Redo">
-                            <Redo className="h-4 w-4" />
-                        </button>
-                        <div className="w-px h-4 bg-white/20 shrink-0" />
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 z-40 bg-black/80 backdrop-blur-md rounded-full px-4 py-2 border border-white/10 w-max max-w-[90%] overflow-x-auto">
                         <button onClick={() => setViewZoom(Math.max(25, viewZoom - 25))} disabled={viewZoom <= 25} className="p-2 rounded-full hover:bg-white/10 text-white disabled:opacity-30 transition-colors" title="Zoom Out">
                             <ZoomOut className="h-4 w-4" />
                         </button>
@@ -1279,9 +1271,27 @@ export function Editor() {
                     </div>
                 )}
 
-                {/* Action Buttons (Top Right) */}
                 {imageState && (
                     <div className="absolute top-4 right-4 flex gap-2 z-40">
+                        <button
+                            onClick={undo}
+                            disabled={!canUndo}
+                            className="w-10 h-10 flex items-center justify-center rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-white hover:bg-white/10 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Undo"
+                        >
+                            <Undo className="h-5 w-5" />
+                        </button>
+                        <button
+                            onClick={redo}
+                            disabled={!canRedo}
+                            className="w-10 h-10 flex items-center justify-center rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-white hover:bg-white/10 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Redo"
+                        >
+                            <Redo className="h-5 w-5" />
+                        </button>
+
+                        <div className="w-px h-10 bg-white/10 mx-1" />
+
                         <button
                             onClick={handleSave}
                             disabled={isSaving}

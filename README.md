@@ -31,6 +31,21 @@ This application is built for production deployment using Docker.
 
 ## Deployment with Docker
 
+### Troubleshooting Linux Development
+
+If you encounter `Error: EMFILE: too many open files` or `Watchpack Error`, you need to increase your system's file watcher limit.
+
+Run this command to increase the limit temporarily:
+```bash
+sudo sysctl -w fs.inotify.max_user_watches=524288
+```
+
+To make it permanent, add this line to `/etc/sysctl.conf`:
+```
+fs.inotify.max_user_watches=524288
+```
+Then run `sudo sysctl -p`.
+
 The application is containerized and available on Docker Hub.
 
 ### Method 1: Docker Run
