@@ -3,6 +3,7 @@
 import React, { createContext, useContext, ReactNode, useEffect, useState } from "react";
 import { useHistory } from "@/hooks/useHistory";
 import { ImageState } from "@/types/editor";
+import { get, set } from 'idb-keyval';
 
 interface EditorContextType {
     imageState: ImageState | null;
@@ -16,7 +17,7 @@ interface EditorContextType {
 
 const EditorContext = createContext<EditorContextType | undefined>(undefined);
 
-import { get, set } from 'idb-keyval';
+
 
 // Helper to resize image for proxy
 export const generateProxy = async (src: string, maxWidth = 1920): Promise<string> => {

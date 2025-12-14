@@ -778,12 +778,6 @@ export function Editor() {
         const baseSrc = imageState?.originalSrc || imageState?.src;
         if (!baseSrc) return;
 
-        // Use transition but we also need to handle async replay outside if possible, or inside?
-        // startTransition doesn't wait for promises but we need to wait to get the result.
-        // Actually we can do the heavy work before startTransition or inside.
-        // Let's do it inside but we need to manage isSaving manually or use the transition.
-
-        // We set IsProcessing just in case
         setIsProcessing(true);
 
         try {
@@ -795,20 +789,83 @@ export function Editor() {
 
             startTransition(async () => {
                 try {
-                    // Convert image to blob (handles both data URLs and regular URLs)
-                    const blob = await imageToBlob(finalImage);
+                    // OPTIMIZATION: Re-encode to JPEG if possible to save space/bandwidth
+                    // Reuse logic from handleDownload (inline here for safety)
 
-                    // Determine file extension from mime type
-                    let extension = 'png';
-                    if (blob.type === 'image/jpeg') extension = 'jpg';
-                    else if (blob.type === 'image/webp') extension = 'webp';
-                    else if (blob.type === 'image/gif') extension = 'gif';
+                    // 1. Determine Output Format
+                    let outputMimeType = 'image/jpeg';
+                    let outputQuality = 0.92;
+                    let outputExtension = 'jpg';
 
-                    const file = new File([blob], `edit.${extension}`, { type: blob.type });
+                    try {
+                        if (baseSrc.startsWith('data:image/')) {
+                            const match = baseSrc.match(/data:(image\/\w+)/);
+                            if (match && match[1] === 'image/png') {
+                                outputMimeType = 'image/png';
+                                outputExtension = 'png';
+                                outputQuality = 1.0;
+                            }
+                        } else {
+                            const response = await fetch(baseSrc);
+                            const blob = await response.blob();
+                            if (blob.type === 'image/png') {
+                                outputMimeType = 'image/png';
+                                outputExtension = 'png';
+                                outputQuality = 1.0;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Could not detect original format for save, defaulting to JPEG");
+                    }
+
+                    // 2. Convert to Data URL with correct format
+                    const toDataURL = async (imageUrl: string, mimeType: string, quality: number): Promise<string> => {
+                        if (imageUrl.startsWith(`data:${mimeType}`)) return imageUrl;
+
+                        return new Promise<string>((resolve, reject) => {
+                            const img = new Image();
+                            img.crossOrigin = 'anonymous';
+                            img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = img.width;
+                                canvas.height = img.height;
+                                const ctx = canvas.getContext('2d');
+                                if (ctx) {
+                                    if (mimeType === 'image/jpeg') {
+                                        ctx.fillStyle = '#FFFFFF';
+                                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                                    }
+                                    ctx.drawImage(img, 0, 0);
+                                    resolve(canvas.toDataURL(mimeType, quality));
+                                } else {
+                                    reject(new Error('Canvas context failed'));
+                                }
+                            };
+                            img.onerror = () => reject(new Error('Image load failed'));
+                            img.src = imageUrl;
+                        });
+                    };
+
+                    const optimizedDataUrl = await toDataURL(finalImage, outputMimeType, outputQuality);
+
+                    // 3. Convert to Blob
+                    const res = await fetch(optimizedDataUrl);
+                    const blob = await res.blob();
+
+                    const file = new File([blob], `edit.${outputExtension}`, { type: blob.type });
 
                     const formData = new FormData();
                     formData.append("resultImage", file);
-                    formData.append("originalUrl", baseSrc); // We send original URL too
+
+                    // CRITICAL FIX: Do NOT send the original URL if it's a huge Data URL (base64)
+                    // This doubles the payload size and crashes the server/request limit.
+                    // Only send it if it's a remote URL (http/https)
+                    if (baseSrc.startsWith('http')) {
+                        formData.append("originalUrl", baseSrc);
+                    } else {
+                        formData.append("originalUrl", "Local Upload (Not Saved)");
+                    }
+
                     formData.append("toolUsed", activeTool || "unknown");
 
                     const result = await saveEdit(formData);
@@ -818,7 +875,7 @@ export function Editor() {
                     }
                 } catch (error) {
                     console.error("Failed to save:", error);
-                    showToast("Failed to save project.", "error");
+                    showToast("Failed to save project (Size too large?)", "error");
                 } finally {
                     setIsProcessing(false);
                 }
