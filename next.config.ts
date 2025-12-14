@@ -14,16 +14,15 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-    ];
+
+  serverActions: {
+    bodySizeLimit: '50mb',
   },
-serverActions: {
-  bodySizeLimit: '50mb',
+  experimental: {
+    // Other experimental features can go here
   },
-experimental: {
-  // Other experimental features can go here
-},
-// Mark native modules as external for server-side
-serverExternalPackages: ['sharp', 'onnxruntime-node', '@imgly/background-removal-node', 'better-sqlite3'],
+  // Mark native modules as external for server-side
+  serverExternalPackages: ['sharp', 'onnxruntime-node', '@imgly/background-removal-node', 'better-sqlite3'],
 };
 
 export default nextConfig;
