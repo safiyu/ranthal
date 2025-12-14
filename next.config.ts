@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
     ];
   },
 
+  // @ts-ignore
   serverActions: {
     bodySizeLimit: '50mb',
   },
