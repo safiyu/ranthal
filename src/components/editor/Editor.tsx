@@ -818,24 +818,39 @@ export function Editor() {
                         console.warn("Could not detect original format for save, defaulting to JPEG");
                     }
 
-                    // 2. Convert to Data URL with correct format
+                    // 2. Convert to Data URL with correct format AND max size (4K)
                     const toDataURL = async (imageUrl: string, mimeType: string, quality: number): Promise<string> => {
-                        if (imageUrl.startsWith(`data:${mimeType}`)) return imageUrl;
+                        if (imageUrl.startsWith(`data:${mimeType}`) && imageUrl.length < 500000) return imageUrl; // Return if small enough already
 
                         return new Promise<string>((resolve, reject) => {
                             const img = new Image();
                             img.crossOrigin = 'anonymous';
                             img.onload = () => {
                                 const canvas = document.createElement('canvas');
-                                canvas.width = img.width;
-                                canvas.height = img.height;
+                                let width = img.width;
+                                let height = img.height;
+
+                                // Resize to Max 4K (3840px) to prevent massive payloads crashing servers
+                                const MAX_DIM = 3840;
+                                if (width > MAX_DIM || height > MAX_DIM) {
+                                    if (width > height) {
+                                        height = Math.round((height * MAX_DIM) / width);
+                                        width = MAX_DIM;
+                                    } else {
+                                        width = Math.round((width * MAX_DIM) / height);
+                                        height = MAX_DIM;
+                                    }
+                                }
+
+                                canvas.width = width;
+                                canvas.height = height;
                                 const ctx = canvas.getContext('2d');
                                 if (ctx) {
                                     if (mimeType === 'image/jpeg') {
                                         ctx.fillStyle = '#FFFFFF';
                                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                                     }
-                                    ctx.drawImage(img, 0, 0);
+                                    ctx.drawImage(img, 0, 0, width, height);
                                     resolve(canvas.toDataURL(mimeType, quality));
                                 } else {
                                     reject(new Error('Canvas context failed'));
@@ -851,6 +866,8 @@ export function Editor() {
                     // 3. Convert to Blob
                     const res = await fetch(optimizedDataUrl);
                     const blob = await res.blob();
+
+                    console.log(`Saving Image: ${blob.size / 1024 / 1024} MB, Type: ${outputExtension}`);
 
                     const file = new File([blob], `edit.${outputExtension}`, { type: blob.type });
 
