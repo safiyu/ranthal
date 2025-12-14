@@ -119,7 +119,8 @@ export async function overlayImage(
     x: number,
     y: number,
     width: number,
-    height: number
+    height: number,
+    rotation: number = 0
 ): Promise<string> {
     return new Promise((resolve, reject) => {
         const baseImg = new Image();
@@ -144,8 +145,22 @@ export async function overlayImage(
                 // Draw base image
                 ctx.drawImage(baseImg, 0, 0);
 
-                // Draw overlay image
-                ctx.drawImage(overlayImg, x, y, width, height);
+                // Save context state for rotation
+                ctx.save();
+
+                // Translate to center of overlay position
+                const centerX = x + width / 2;
+                const centerY = y + height / 2;
+                ctx.translate(centerX, centerY);
+
+                // Rotate
+                ctx.rotate((rotation * Math.PI) / 180);
+
+                // Draw overlay image centered at origin
+                ctx.drawImage(overlayImg, -width / 2, -height / 2, width, height);
+
+                // Restore context
+                ctx.restore();
 
                 resolve(canvas.toDataURL("image/png"));
             }

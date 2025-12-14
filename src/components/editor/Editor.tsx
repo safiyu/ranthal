@@ -95,7 +95,9 @@ const imageToBlob = async (imageSrc: string): Promise<Blob> => {
     return await response.blob();
 };
 
-import { useEditorState } from "@/context/EditorContext";
+import { useEditorState, generateProxy } from "@/context/EditorContext";
+import { type EditorAction, type FilterAction } from "@/types/editor-actions";
+import { replayActions } from "@/lib/action-replayer";
 
 export function Editor() {
     const { showToast } = useToast();
@@ -175,6 +177,7 @@ export function Editor() {
     const [activeSticker, setActiveSticker] = useState<string | null>(null);
     const [stickerPos, setStickerPos] = useState({ x: 0, y: 0 });
     const [stickerSize, setStickerSize] = useState(200);
+    const [stickerRotation, setStickerRotation] = useState(0);
     const [activeStickerTab, setActiveStickerTab] = useState(STICKER_CATEGORIES[0].id);
 
     // Preview State (for real-time collage/adjustments before commit)
@@ -427,12 +430,28 @@ export function Editor() {
     }, [currentImage, activeTool]);
 
     const handleBgRemove = async () => {
-        if (!imageState?.src) return;
+        if (!imageState) return;
         setIsProcessing(true);
         try {
-            const source = currentImage || imageState.src;
-            const newSrc = await removeBg(source);
-            pushState({ ...imageState, processedSrc: newSrc });
+            const source = imageState.originalSrc || imageState.src;
+            if (!source) return;
+
+            // Replay actions to preserve previous edits (Rotate -> BgRemove -> Correct)
+            const hasActions = imageState.actions && imageState.actions.length > 0;
+            const inputForAI = hasActions
+                ? await replayActions(source, imageState.actions!)
+                : source;
+
+            const newOriginal = await removeBg(inputForAI);
+            const newProxy = await generateProxy(newOriginal);
+
+            pushState({
+                src: newProxy, // Display proxy
+                originalSrc: newOriginal,
+                proxySrc: newProxy,
+                processedSrc: newProxy,
+                actions: [] // Reset actions
+            });
         } catch (err) {
             // Don't show error if operation was cancelled
             if ((err as Error).message !== 'Operation cancelled') {
@@ -444,90 +463,76 @@ export function Editor() {
         }
     };
 
+
+
     const handleRemaster = async () => {
-        if (!baseImage) return;
+        if (!imageState) return;
         setIsProcessing(true);
         try {
-            const newSrc = await remasterImage(baseImage);
-            setPreviewSrc(newSrc);
-            // We do NOT push state here. User must confirm.
+            const source = imageState.originalSrc || imageState.src;
+            if (!source) return;
+
+            // Replay existing actions first to bake them in?
+            // If we don't, Remaster will run on raw original, ignoring previous edits.
+            // Usually Remaster is done early. But if late, we should Baking.
+            const hasActions = imageState.actions && imageState.actions.length > 0;
+            const inputForRemaster = hasActions
+                ? await replayActions(source, imageState.actions!)
+                : source;
+
+            const newOriginal = await remasterImage(inputForRemaster);
+            const newProxy = await generateProxy(newOriginal);
+
+            pushState({
+                src: newProxy,
+                originalSrc: newOriginal,
+                proxySrc: newProxy,
+                processedSrc: newProxy,
+                actions: []
+            });
+            showToast("Remaster successful", "success");
         } catch (err) {
             showToast("Remaster failed", "error");
-            setActiveTool(null);
         } finally {
             setIsProcessing(false);
-        }
-    };
-
-    // Generic Apply/Cancel for Preview Tools
-    const applyPreview = () => {
-        // Special case for adjustments (CSS only, no separate previewSrc usually, unless we want to commit the CSS)
-        // Wait, applyAdjustments creates a new src. 
-        if (activeTool === 'adjust') {
-            handleApplyAdjustments();
-            return;
-        }
-
-        const currentImageState = imageStateRef.current; // Use Ref for freshness
-
-        try {
-            if (previewSrc && currentImageState) {
-                console.log(`[${Date.now()}] applyPreview: Applying preview...`);
-
-                // Safety Check for Large Images
-                // Large image check removed per user request
-
-                const newState = { ...currentImageState, processedSrc: previewSrc };
-
-                // Attempt push
-                pushState(newState);
-
-                console.log(`[${Date.now()}] applyPreview: PushState called.`);
-                showToast(`Filter applied!`, "success");
-
-                setPreviewSrc(null);
-
-                // Reset states to prevent double-application (visual glitch)
-                setSelectedFilter('none');
-                setBlurAmount(0);
-                setSharpenAmount(0);
-
-                // Close tool on apply
-                if (activeTool === 'remaster' || activeTool === 'filters' || activeTool === 'social-filters') {
-                    setActiveTool(null);
-                }
-            } else {
-                console.warn("Cannot apply preview: previewSrc or imageState missing", { previewSrc: !!previewSrc, imageState: !!currentImageState });
-                showToast("Error: No preview to apply", "error");
-            }
-        } catch (e: any) {
-            console.error("Crash in applyPreview:", e);
-            // using confirm to avoid strict alert blocking, simpler than toast if toast system is crashing
-            window.alert("Critical Error Applying Filter: " + e.message);
-        }
-    };
-
-    const cancelPreview = () => {
-        setPreviewSrc(null);
-        if (activeTool === 'adjust') {
-            // Reset adjustments on cancel but stay in tool? Or exit?
-            // User requested "Apply/Cancel" buttons. Usually Cancel exits or just resets.
-            // Let's reset values.
-            setBrightness(100);
-            setContrast(100);
-            setSaturation(100);
             setActiveTool(null);
-        } else {
-            if (activeTool === 'remaster') setActiveTool(null);
         }
     };
+
+
 
     const handleCrop = async () => {
-        if (!currentImage || !croppedAreaPixels) return;
+        if (!imageState || !currentImage || !croppedAreaPixels || !imgRef.current) return;
         setIsProcessing(true);
         try {
+            // Calculate Normalized Crop for Resolution Independence
+            const image = imgRef.current;
+            const naturalWidth = image.naturalWidth;
+            const naturalHeight = image.naturalHeight;
+
+            // croppedAreaPixels is in DISPLAY PIXELS scaled to match natural size?
+            // "onComplete... setCroppedAreaPixels... c.x * scaleX"
+            // Yes, croppedAreaPixels are in NATURAL image pixels of the CURRENT (proxy) image.
+
+            const normalizedCrop = {
+                x: croppedAreaPixels.x / naturalWidth,
+                y: croppedAreaPixels.y / naturalHeight,
+                width: croppedAreaPixels.width / naturalWidth,
+                height: croppedAreaPixels.height / naturalHeight
+            };
+
+            const action: EditorAction = {
+                type: 'crop',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                crop: crop as Crop, // Saving generic crop for reference
+                cropData: normalizedCrop
+            };
+
+            const newActions = [...(imageState.actions || []), action];
             const croppedImage = await getCroppedImg(currentImage, croppedAreaPixels);
-            pushState({ ...imageState!, processedSrc: croppedImage });
+
+            pushState({ ...imageState, processedSrc: croppedImage, actions: newActions });
             setActiveTool(null);
         } catch (e) {
             console.error(e);
@@ -541,8 +546,18 @@ export function Editor() {
         if (!frontImage || !backImage) return;
         setIsProcessing(true);
         try {
-            const newSrc = await createIDCard(frontImage, backImage, frontScale / 100, backScale / 100);
-            pushState({ ...imageState!, processedSrc: newSrc });
+            // Flattening Strategy
+            // ID Card is a new composition.
+            const newOriginal = await createIDCard(frontImage, backImage, frontScale / 100, backScale / 100);
+            const newProxy = await generateProxy(newOriginal);
+
+            pushState({
+                src: newProxy,
+                originalSrc: newOriginal,
+                proxySrc: newProxy,
+                processedSrc: newProxy,
+                actions: []
+            });
         } catch (err) {
             showToast("Error creating ID Card", "error");
         } finally {
@@ -556,11 +571,29 @@ export function Editor() {
     };
 
     const handleCompress = async () => {
-        if (!currentImage) return;
+        if (!imageState) return;
         setIsProcessing(true);
         try {
-            const newSrc = await compressImage(currentImage, compressionQuality / 100);
-            pushState({ ...imageState!, processedSrc: newSrc });
+            // Flattening Strategy
+            // Compression changes the fundamental image data/artifacts.
+            const source = imageState.originalSrc || imageState.src;
+            if (!source) return;
+
+            const hasActions = imageState.actions && imageState.actions.length > 0;
+            const inputComp = hasActions
+                ? await replayActions(source, imageState.actions!)
+                : source;
+
+            const newOriginal = await compressImage(inputComp, compressionQuality / 100);
+            const newProxy = await generateProxy(newOriginal);
+
+            pushState({
+                src: newProxy,
+                originalSrc: newOriginal,
+                proxySrc: newProxy,
+                processedSrc: newProxy,
+                actions: []
+            });
         } catch (err) {
             showToast("Compression failed", "error");
         } finally {
@@ -742,157 +775,187 @@ export function Editor() {
 
 
     const handleSave = async () => {
-        if (!currentImage) return;
+        const baseSrc = imageState?.originalSrc || imageState?.src;
+        if (!baseSrc) return;
 
-        startTransition(async () => {
-            try {
-                // Convert image to blob (handles both data URLs and regular URLs)
-                const blob = await imageToBlob(currentImage);
+        // Use transition but we also need to handle async replay outside if possible, or inside?
+        // startTransition doesn't wait for promises but we need to wait to get the result.
+        // Actually we can do the heavy work before startTransition or inside.
+        // Let's do it inside but we need to manage isSaving manually or use the transition.
 
-                // Determine file extension from mime type
-                let extension = 'png';
-                if (blob.type === 'image/jpeg') extension = 'jpg';
-                else if (blob.type === 'image/webp') extension = 'webp';
-                else if (blob.type === 'image/gif') extension = 'gif';
+        // We set IsProcessing just in case
+        setIsProcessing(true);
 
-                const file = new File([blob], `edit.${extension}`, { type: blob.type });
+        try {
+            // HIGH RES REPLAY
+            const hasActions = imageState?.actions && imageState.actions.length > 0;
+            const finalImage = hasActions
+                ? await replayActions(baseSrc, imageState!.actions!)
+                : (imageState?.processedSrc || baseSrc);
 
-                const formData = new FormData();
-                formData.append("resultImage", file);
-                formData.append("originalUrl", imageState?.src || "");
-                formData.append("toolUsed", activeTool || "unknown");
+            startTransition(async () => {
+                try {
+                    // Convert image to blob (handles both data URLs and regular URLs)
+                    const blob = await imageToBlob(finalImage);
 
-                const result = await saveEdit(formData);
-                if (result.success) {
-                    showToast("Project saved successfully!", "success");
-                    router.refresh();
+                    // Determine file extension from mime type
+                    let extension = 'png';
+                    if (blob.type === 'image/jpeg') extension = 'jpg';
+                    else if (blob.type === 'image/webp') extension = 'webp';
+                    else if (blob.type === 'image/gif') extension = 'gif';
+
+                    const file = new File([blob], `edit.${extension}`, { type: blob.type });
+
+                    const formData = new FormData();
+                    formData.append("resultImage", file);
+                    formData.append("originalUrl", baseSrc); // We send original URL too
+                    formData.append("toolUsed", activeTool || "unknown");
+
+                    const result = await saveEdit(formData);
+                    if (result.success) {
+                        showToast("Project saved successfully!", "success");
+                        router.refresh();
+                    }
+                } catch (error) {
+                    console.error("Failed to save:", error);
+                    showToast("Failed to save project.", "error");
+                } finally {
+                    setIsProcessing(false);
                 }
-            } catch (error) {
-                console.error("Failed to save:", error);
-                showToast("Failed to save project.", "error");
-            }
-        });
+            });
+        } catch (e) {
+            console.error("Replay failed during save", e);
+            showToast("Failed to prepare image for save", "error");
+            setIsProcessing(false);
+        }
     };
 
     const handleDownload = async () => {
-        if (!currentImage) return;
-
-        // Helper function to convert data URL to Blob
-        const dataURLtoBlob = (dataUrl: string): Blob => {
-            const arr = dataUrl.split(',');
-            const mimeMatch = arr[0].match(/:(.*?);/);
-            const mime = mimeMatch ? mimeMatch[1] : 'image/png';
-            const bstr = atob(arr[1]);
-            let n = bstr.length;
-            const u8arr = new Uint8Array(n);
-            while (n--) {
-                u8arr[n] = bstr.charCodeAt(n);
-            }
-            return new Blob([u8arr], { type: mime });
-        };
-
-        // Helper to convert any image URL to data URL via canvas
-        const toDataURL = async (imageUrl: string, quality = 1.0): Promise<string> => {
-            if (imageUrl.startsWith('data:')) {
-                return imageUrl;
-            }
-            // For blob URLs or other URLs, convert via canvas
-            return new Promise<string>((resolve, reject) => {
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                        ctx.drawImage(img, 0, 0);
-                        // Determine format based on src or default to png (which ignores quality, but good to have)
-                        // Actually better to force user choice or detect. 
-                        // But for download "as is" we often want png. 
-                        // However, if we want quality control for jpeg we need to specify.
-                        // Let's stick to png as default for lossless, but allow jpeg if needed.
-                        // For this helper, let's just return png as before BUT if we want to support quality we might need jpeg/webp
-                        resolve(canvas.toDataURL('image/png'));
-                    } else {
-                        reject(new Error('Canvas context failed'));
-                    }
-                };
-                img.onerror = () => reject(new Error('Image load failed'));
-                img.src = imageUrl;
-            });
-        };
-
-        // Fallback download function for browsers without File System Access API
-        const fallbackDownload = (blob: Blob, filename: string) => {
-            const blobUrl = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = filename;
-            link.style.display = 'none';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-        };
+        // If we have an originalSrc and actions, we MUST replay them on the originalSrc now
+        const baseSrc = imageState?.originalSrc || imageState?.src;
+        if (!baseSrc) return;
 
         try {
-            // First ensure we have a data URL
-            const dataUrl = await toDataURL(currentImage, 1.0);
+            // 1. Determine Output Format (Fast Check)
+            let outputMimeType = 'image/jpeg';
+            let outputQuality = 0.92;
+            let outputExtension = 'jpg';
 
-            // Determine file extension and mime type from data URL
-            let extension = 'png';
-            let mimeType = 'image/png';
-            if (dataUrl.startsWith('data:image/')) {
-                const mimeMatch = dataUrl.match(/data:image\/(\w+)/);
-                if (mimeMatch) {
-                    extension = mimeMatch[1] === 'jpeg' ? 'jpg' : mimeMatch[1];
-                    mimeType = `image/${mimeMatch[1]}`;
+            try {
+                if (baseSrc.startsWith('data:image/')) {
+                    const match = baseSrc.match(/data:(image\/\w+)/);
+                    if (match && match[1] === 'image/png') {
+                        outputMimeType = 'image/png';
+                        outputExtension = 'png';
+                        outputQuality = 1.0;
+                    }
+                } else {
+                    const response = await fetch(baseSrc);
+                    const blob = await response.blob();
+                    if (blob.type === 'image/png') {
+                        outputMimeType = 'image/png';
+                        outputExtension = 'png';
+                        outputQuality = 1.0;
+                    }
                 }
+            } catch (e) {
+                console.warn("Could not detect original format, defaulting to JPEG");
             }
 
-            const defaultFilename = `ranthal-edit-${Date.now()}.${extension}`;
+            const defaultFilename = `ranthal-edit-${Date.now()}.${outputExtension}`;
 
-            // Convert data URL to Blob
-            const blob = dataURLtoBlob(dataUrl);
-
-            // Check if File System Access API is available (Chrome/Edge)
+            // 2. Invoke File Picker IMMEDIATELY (to preserve user activation)
+            let fileHandle: any = null;
             if ('showSaveFilePicker' in window) {
                 try {
-                    const fileHandle = await (window as any).showSaveFilePicker({
+                    fileHandle = await (window as any).showSaveFilePicker({
                         suggestedName: defaultFilename,
-                        types: [
-                            {
-                                description: 'Image Files',
-                                accept: {
-                                    [mimeType]: [`.${extension}`],
-                                    'image/png': ['.png'],
-                                    'image/jpeg': ['.jpg', '.jpeg'],
-                                    'image/webp': ['.webp'],
-                                },
-                            },
-                        ],
+                        types: [{
+                            description: outputExtension.toUpperCase() + ' Image',
+                            accept: { [outputMimeType]: [`.${outputExtension}`] }
+                        }],
                     });
-
-                    const writable = await fileHandle.createWritable();
-                    await writable.write(blob);
-                    await writable.close();
                 } catch (err: any) {
-                    // User cancelled the save dialog
-                    if (err.name === 'AbortError') {
-                        return;
-                    }
-                    // Fallback if something else went wrong
-                    console.warn('File System Access API failed, using fallback:', err);
-                    fallbackDownload(blob, defaultFilename);
+                    // If user cancelled, stop everything
+                    if (err.name === 'AbortError') return;
+                    // If not supported/other error, we will use fallback later
+                    console.warn('File Picker failed, falling back:', err);
                 }
-            } else {
-                // Use fallback for browsers without File System Access API
-                fallbackDownload(blob, defaultFilename);
             }
+
+            // 3. Process Image (Heavy Operation)
+            setIsProcessing(true);
+
+            const hasActions = imageState?.actions && imageState.actions.length > 0;
+            const finalImage = hasActions
+                ? await replayActions(baseSrc, imageState!.actions!)
+                : (imageState?.processedSrc || baseSrc);
+
+            // Helpers
+            const dataURLtoBlob = (dataUrl: string): Blob => {
+                const arr = dataUrl.split(',');
+                const mimeMatch = arr[0].match(/:(.*?);/);
+                const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+                const bstr = atob(arr[1]);
+                let n = bstr.length;
+                const u8arr = new Uint8Array(n);
+                while (n--) u8arr[n] = bstr.charCodeAt(n);
+                return new Blob([u8arr], { type: mime });
+            };
+
+            const toDataURL = async (imageUrl: string, mimeType: string, quality: number): Promise<string> => {
+                if (imageUrl.startsWith(`data:${mimeType}`)) return imageUrl;
+
+                return new Promise<string>((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) {
+                            if (mimeType === 'image/jpeg') {
+                                ctx.fillStyle = '#FFFFFF';
+                                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            }
+                            ctx.drawImage(img, 0, 0);
+                            resolve(canvas.toDataURL(mimeType, quality));
+                        } else {
+                            reject(new Error('Canvas context failed'));
+                        }
+                    };
+                    img.onerror = () => reject(new Error('Image load failed'));
+                    img.src = imageUrl;
+                });
+            };
+
+            const finalDataUrl = await toDataURL(finalImage, outputMimeType, outputQuality);
+            const blob = dataURLtoBlob(finalDataUrl);
+
+            // 4. Save to File
+            if (fileHandle) {
+                const writable = await fileHandle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+            } else {
+                // Fallback Download
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = defaultFilename;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+            }
+
         } catch (error) {
             console.error('Download failed:', error);
             alert('Download failed. Please try again.');
+        } finally {
+            setIsProcessing(false);
         }
     };
 
@@ -920,15 +983,38 @@ export function Editor() {
     }, [selectedFilter, activeTool]); // Removed baseImage dependency to avoid loops, though Ref handles it
 
     // Adjustments handler
+    // Adjustments handler
     const handleApplyAdjustments = async () => {
-        if (!currentImage) return;
+        if (!imageState) return;
         setIsProcessing(true);
         try {
-            const newSrc = await applyAdjustments(currentImage, brightness, contrast, saturation);
-            pushState({ ...imageState!, processedSrc: newSrc });
+            // Create Action
+            const action: EditorAction = {
+                type: 'adjust',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                brightness: brightness,
+                contrast: contrast,
+                saturation: saturation
+            };
+
+            const newActions = [...(imageState.actions || []), action];
+
+            // We use the already computed result from `applyAdjustments` (if we had a preview)
+            // But wait, adjustments usually apply CSS preview, they don't generate a `previewSrc` until "Apply" is clicked?
+            // Actually `Editor` implies `applyAdjustments` generates a new SRC.
+            // Let's generate the preview using the replayer or just the function
+            const newSrc = await applyAdjustments(imageState.processedSrc || imageState.src, brightness, contrast, saturation);
+
+            pushState({
+                ...imageState,
+                processedSrc: newSrc,
+                actions: newActions
+            });
+
             showToast("Adjustments applied", "success");
 
-            // Reset values after apply to prevent double-effect
+            // Reset values
             setBrightness(100);
             setContrast(100);
             setSaturation(100);
@@ -937,24 +1023,29 @@ export function Editor() {
         } catch (err: any) {
             console.error("Adjustment apply error:", err);
             showToast("Failed to apply adjustments", "error");
-            window.alert("Error applying adjustments: " + err.message);
         } finally {
             setIsProcessing(false);
-            setActiveTool(null);
-            setBrightness(100);
-            setContrast(100);
-            setSaturation(100);
         }
     };
 
     // Rotate handler
+    // Rotate handler
     const handleRotate = async (angle: number) => {
-        if (!currentImage) return;
+        if (!imageState) return;
         setIsProcessing(true);
         try {
-            const newSrc = await rotateImage(currentImage, angle);
-            pushState({ ...imageState!, processedSrc: newSrc });
-            setRotation(0); // Reset slider after applying
+            const action: EditorAction = {
+                type: 'rotate',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                angle: angle
+            };
+
+            const newActions = [...(imageState.actions || []), action];
+            const newSrc = await rotateImage(imageState.processedSrc || imageState.src, angle);
+
+            pushState({ ...imageState, processedSrc: newSrc, actions: newActions });
+            setRotation(0);
         } catch (err) {
             showToast("Failed to rotate", "error");
         } finally {
@@ -963,12 +1054,21 @@ export function Editor() {
     };
 
     // Flip handler
+    // Flip handler
     const handleFlip = async (direction: 'horizontal' | 'vertical') => {
-        if (!currentImage) return;
+        if (!imageState) return;
         setIsProcessing(true);
         try {
-            const newSrc = await flipImage(currentImage, direction);
-            pushState({ ...imageState!, processedSrc: newSrc });
+            const action: EditorAction = {
+                type: 'flip',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                direction: direction
+            };
+            const newActions = [...(imageState.actions || []), action];
+            const newSrc = await flipImage(imageState.processedSrc || imageState.src, direction);
+
+            pushState({ ...imageState, processedSrc: newSrc, actions: newActions });
         } catch (err) {
             showToast("Failed to flip", "error");
         } finally {
@@ -977,10 +1077,23 @@ export function Editor() {
     };
 
     // Unified Blur/Sharpen handler
+    // Unified Blur/Sharpen handler
     const handleApplyBlurSharpen = async () => {
-        // If we already have a preview, just commit it to avoid double-processing
+        if (!imageState) return;
+
+        // If we already have a preview, just commit it with action
         if (previewSrc) {
-            pushState({ ...imageState!, processedSrc: previewSrc });
+            const action: EditorAction = {
+                type: 'blur-sharpen',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                blur: blurAmount,
+                sharpen: sharpenAmount
+            };
+            const newActions = [...(imageState.actions || []), action];
+
+            pushState({ ...imageState, processedSrc: previewSrc, actions: newActions });
+
             setPreviewSrc(null);
             setIsProcessing(false);
             setActiveTool(null);
@@ -989,24 +1102,27 @@ export function Editor() {
             return;
         }
 
-        const baseImage = imageState?.processedSrc || imageState?.src;
+        const baseImage = imageState.processedSrc || imageState.src;
         if (!baseImage || (blurAmount === 0 && sharpenAmount === 0)) return;
 
         setIsProcessing(true);
         try {
             let processedSrc = baseImage;
-
             // Apply Blur if needed
-            if (blurAmount > 0) {
-                processedSrc = await applyBlur(processedSrc, blurAmount);
-            }
-
+            if (blurAmount > 0) processedSrc = await applyBlur(processedSrc, blurAmount);
             // Apply Sharpen if needed
-            if (sharpenAmount > 0) {
-                processedSrc = await applySharpen(processedSrc, sharpenAmount / 100);
-            }
+            if (sharpenAmount > 0) processedSrc = await applySharpen(processedSrc, sharpenAmount / 100);
 
-            pushState({ ...imageState!, processedSrc });
+            const action: EditorAction = {
+                type: 'blur-sharpen',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                blur: blurAmount,
+                sharpen: sharpenAmount
+            };
+            const newActions = [...(imageState.actions || []), action];
+
+            pushState({ ...imageState, processedSrc, actions: newActions });
         } catch (err) {
             showToast("Failed to apply effects", "error");
         } finally {
@@ -1072,19 +1188,43 @@ export function Editor() {
     };
 
     const handleApplySticker = async () => {
-        if (!activeSticker || !currentImage) return;
+        if (!activeSticker || !currentImage || !imageState || !imageRef.current) return;
         setIsProcessing(true);
         try {
+            // Need to calculate normalized position
+            const image = imageRef.current;
+            const naturalWidth = image.naturalWidth;
+            const naturalHeight = image.naturalHeight;
+
+            const normalizedX = stickerPos.x / naturalWidth;
+            const normalizedY = stickerPos.y / naturalHeight;
+            const normalizedSizeW = stickerSize / naturalWidth;
+            const normalizedSizeH = stickerSize / naturalHeight;
+
+            const action: EditorAction = {
+                type: 'sticker',
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                stickerSrc: activeSticker,
+                x: normalizedX,
+                y: normalizedY,
+                width: normalizedSizeW,
+                height: normalizedSizeH,
+                rotation: stickerRotation
+            };
+
             const processed = await overlayImage(
                 currentImage,
                 activeSticker,
                 stickerPos.x,
                 stickerPos.y,
                 stickerSize,
-                stickerSize
+                stickerSize,
+                stickerRotation
             );
-            // Create history entry
-            pushState({ ...imageState!, processedSrc: processed });
+
+            const newActions = [...(imageState.actions || []), action];
+            pushState({ ...imageState, processedSrc: processed, actions: newActions });
             setActiveSticker(null);
             setActiveTool(null);
             showToast("Sticker applied successfully", "success");
@@ -1333,6 +1473,87 @@ export function Editor() {
             setActiveTool(null);
         }
     };
+
+    // Generic Apply/Cancel for Preview Tools
+    const applyPreview = async () => {
+        // Special case for adjustments (handled elsewhere usually, but if here, redirect)
+        if (activeTool === 'adjust') {
+            handleApplyAdjustments();
+            return;
+        }
+
+        const currentImageState = imageStateRef.current; // Use Ref for freshness
+
+        try {
+            if (previewSrc && currentImageState) {
+                console.log(`[${Date.now()}] applyPreview: Applying preview...`);
+
+                // Create Action based on active tool
+                let newAction: EditorAction | null = null;
+
+                if (activeTool === 'filters' || activeTool === 'social-filters') {
+                    newAction = {
+                        type: 'filter',
+                        id: crypto.randomUUID(),
+                        timestamp: Date.now(),
+                        filterName: selectedFilter
+                    };
+                } else if (activeTool === 'remaster') {
+                    // Remaster is unique, maybe no action yet or custom action?
+                    // For now, let's treat it as a generic "replace image" action or just skip action recording (legacy fallback)
+                    // If we want to support it, we need a 'remaster' action type.
+                    // Let's assume for now Remaster is destructive/base improvement.
+                }
+
+                const newActions = newAction
+                    ? [...(currentImageState.actions || []), newAction]
+                    : (currentImageState.actions || []);
+
+                const newState = {
+                    ...currentImageState,
+                    processedSrc: previewSrc,
+                    actions: newActions
+                };
+
+                // Attempt push
+                pushState(newState);
+
+                console.log(`[${Date.now()}] applyPreview: PushState called with action:`, newAction?.type);
+                showToast(`Applied successfully!`, "success");
+
+                setPreviewSrc(null);
+
+                // Reset states
+                setSelectedFilter('none');
+                setBlurAmount(0);
+                setSharpenAmount(0);
+
+                if (activeTool === 'remaster' || activeTool === 'filters' || activeTool === 'social-filters') {
+                    setActiveTool(null);
+                }
+            } else {
+                console.warn("Cannot apply preview: previewSrc or imageState missing");
+                showToast("Error: No preview to apply", "error");
+            }
+        } catch (e: any) {
+            console.error("Crash in applyPreview:", e);
+            window.alert("Critical Error Applying: " + e.message);
+        }
+    };
+
+    const cancelPreview = () => {
+        setPreviewSrc(null);
+        if (activeTool === 'adjust') {
+            // Reset adjustments on cancel but stay in tool? Or exit?
+            setBrightness(100);
+            setContrast(100);
+            setSaturation(100);
+            setActiveTool(null);
+        } else {
+            if (activeTool === 'remaster') setActiveTool(null);
+        }
+    };
+
 
     return (
         <div className="flex flex-col lg:flex-row h-full lg:h-[calc(100vh-64px)] overflow-y-auto lg:overflow-hidden pt-20 lg:pt-0">
@@ -1616,7 +1837,7 @@ export function Editor() {
                                                     top: `${(stickerPos.y / imageRef.current.naturalHeight) * 100}%`,
                                                     width: `${(stickerSize / imageRef.current.naturalWidth) * 100}%`,
                                                     zIndex: 30,
-                                                    transform: 'translate(0, 0)',
+                                                    transform: `translate(0, 0) rotate(${stickerRotation}deg)`,
                                                     opacity: 0.9
                                                 }}
                                                 onMouseDown={(e) => {
@@ -1682,6 +1903,63 @@ export function Editor() {
                                                     document.addEventListener('mouseup', handleResizeUp);
                                                 }}
                                             />
+
+                                            {/* Rotation Handle for Sticker */}
+                                            <div
+                                                className="absolute w-5 h-5 bg-white rounded-full shadow-md flex items-center justify-center cursor-move z-40 border border-teal-500 hover:scale-110 transition-transform"
+                                                style={{
+                                                    // Position initially at Top Center of the sticker rect
+                                                    left: `${((stickerPos.x + stickerSize / 2) / imageRef.current.naturalWidth) * 100}%`,
+                                                    top: `${((stickerPos.y - 20) / imageRef.current.naturalHeight) * 100}%`,
+
+                                                    // Apply rotation equal to sticker's rotation
+                                                    transform: `translate(-50%, -50%) rotate(${stickerRotation}deg)`,
+
+                                                    // Pivot around the center of the sticker
+                                                    // Distance from Handle (Top - 20) to Center (Top + Size/2) is (20 + Size/2) pixels
+                                                    // Note: We need to convert this pixel distance to a string
+                                                    transformOrigin: `50% ${(20 + stickerSize / 2) * imageScale}px`
+                                                    // Wait, transformOrigin uses CSS pixels. stickerSize is logic pixels (natural resolution).
+                                                    // If the image is scaled (imageScale), visually the sticker is smaller.
+                                                    // We need to account for imageScale! 
+                                                    // Actually, 'left'/'top' % are robust.
+                                                    // But 'transformOrigin' in px needs to match visual pixels.
+                                                    // stickerSize * imageScale = Visual Size.
+                                                }}
+                                                onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation(); // Stop panning
+
+                                                    // Calculate center of sticker in CLIENT coordinates
+                                                    const rect = imageRef.current!.getBoundingClientRect();
+                                                    const scaleX = rect.width / imageRef.current!.naturalWidth;
+                                                    const scaleY = rect.height / imageRef.current!.naturalHeight;
+
+                                                    const centerX = rect.left + (stickerPos.x + stickerSize / 2) * scaleX;
+                                                    const centerY = rect.top + (stickerPos.y + stickerSize / 2) * scaleY;
+
+                                                    const handleRotateMove = (moveEvent: MouseEvent) => {
+                                                        const dx = moveEvent.clientX - centerX;
+                                                        const dy = moveEvent.clientY - centerY;
+                                                        // Angle in degrees
+                                                        let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+                                                        // atan2(0,-1) is 180 (Left). atan2(-1,0) is -90 (Top).
+                                                        // We want Top to be 0 deg.
+                                                        // So -90 + offset = 0 => offset = +90.
+                                                        setStickerRotation(angle + 90);
+                                                    };
+
+                                                    const handleRotateUp = () => {
+                                                        document.removeEventListener('mousemove', handleRotateMove);
+                                                        document.removeEventListener('mouseup', handleRotateUp);
+                                                    };
+
+                                                    document.addEventListener('mousemove', handleRotateMove);
+                                                    document.addEventListener('mouseup', handleRotateUp);
+                                                }}
+                                            >
+                                                <RotateCw className="w-3 h-3 text-teal-600" />
+                                            </div>
                                         </>
                                     )}
                                     {activeTool === "draw" && (
