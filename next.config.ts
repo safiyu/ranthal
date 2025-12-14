@@ -15,12 +15,10 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  // @ts-ignore
-  serverActions: {
-    bodySizeLimit: '50mb',
-  },
   experimental: {
-    // Other experimental features can go here
+    serverActions: {
+      bodySizeLimit: '50mb',
+    },
   },
   // Mark native modules as external for server-side
   serverExternalPackages: ['sharp', 'onnxruntime-node', '@imgly/background-removal-node', 'better-sqlite3'],

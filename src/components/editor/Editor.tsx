@@ -46,7 +46,8 @@ import {
     Filter,
     Focus,
     QrCode,
-    Sparkles
+    Sparkles,
+    Loader2
 } from "lucide-react";
 import { saveEdit } from "@/app/actions";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -55,12 +56,12 @@ import { removeBg, extractText, compressImage, cancelBgRemoval, cancelOcr } from
 import { createIDCard } from "@/lib/id-card-utils";
 import { createCollage, AVAILABLE_LAYOUTS, type LayoutType, type CollageTransform } from "@/lib/collage-utils";
 import getCroppedImg from "@/lib/crop-utils";
-import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, remasterImage, type FilterName, FILTER_PRESETS } from "@/lib/image-effects";
+import { applyFilter, applyAdjustments, rotateImage, flipImage, applyBlur, applySharpen, fixRedEye, remasterImage, cartoonize, fixImageOrientation, trimTransparency, cleanupNoise, removeIsolatedComponents, type FilterName, FILTER_PRESETS } from "@/lib/image-effects";
 import { useToast } from "@/components/Toast";
 import { jsPDF } from "jspdf";
 import EXIF from "exif-js";
 import { generateQRCode, formatWifi, formatVCard, formatSms, formatEmail, formatPhone, formatGeo } from "@/lib/qr-utils";
-import { STICKER_CATEGORIES, emojiToDataURL } from "@/lib/sticker-utils";
+import { STICKER_CATEGORIES, emojiToDataURL, getCustomStickers, saveCustomSticker, deleteCustomSticker } from "@/lib/sticker-utils";
 import { overlayImage } from "@/lib/image-processing";
 import { Sticker as StickerIcon } from "lucide-react";
 
@@ -179,6 +180,27 @@ export function Editor() {
     const [stickerSize, setStickerSize] = useState(200);
     const [stickerRotation, setStickerRotation] = useState(0);
     const [activeStickerTab, setActiveStickerTab] = useState(STICKER_CATEGORIES[0].id);
+    const [customStickers, setCustomStickers] = useState<string[]>([]);
+    const [isUploadingSticker, setIsUploadingSticker] = useState(false);
+    const [cartoonizeSticker, setCartoonizeSticker] = useState(true);
+    const [cleanupSticker, setCleanupSticker] = useState(true);
+    const [autoCropSticker, setAutoCropSticker] = useState(true);
+
+    // Sticker Crop State
+    const [stickerCropSrc, setStickerCropSrc] = useState<string | null>(null);
+    const [stickerCrop, setStickerCrop] = useState<Crop>({
+        unit: '%',
+        width: 100,
+        height: 100,
+        x: 0,
+        y: 0
+    });
+    const [stickerCompletedCrop, setStickerCompletedCrop] = useState<PixelCrop>();
+
+    const [stickerCroppedAreaPixels, setStickerCroppedAreaPixels] = useState<any>(null);
+    const [stickerZoom, setStickerZoom] = useState(1);
+    const [stickerBaseDim, setStickerBaseDim] = useState<{ w: number, h: number } | null>(null);
+    const stickerImgRef = useRef<HTMLImageElement>(null);
 
     // Preview State (for real-time collage/adjustments before commit)
     const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -1320,6 +1342,171 @@ export function Editor() {
                 y: (imageRef.current.naturalHeight / 2) - 100
             });
         }
+    };
+
+    // Load custom stickers from IndexedDB on mount
+    useEffect(() => {
+        getCustomStickers().then(setCustomStickers);
+    }, []);
+
+    // Handle selecting a custom sticker (already a data URL)
+    const handleSelectCustomSticker = (dataUrl: string) => {
+        setActiveSticker(dataUrl);
+        setStickerSize(200);
+        if (imageRef.current) {
+            setStickerPos({
+                x: (imageRef.current.naturalWidth / 2) - 100,
+                y: (imageRef.current.naturalHeight / 2) - 100
+            });
+        }
+    };
+
+    // Process the final sticker image (after optional cropping)
+    const processSticker = async (sourceUrl: string) => {
+        setIsUploadingSticker(true);
+        try {
+            // 2. Remove background using existing API
+            // Note: removeBg takes a data URL/src string
+            const stickerWithNoBg = await removeBg(sourceUrl);
+
+            // 3. Convert blob URL to data URL for further processing if needed
+            // (removeBg returns a blob URL usually)
+            let processedDataUrl = await new Promise<string>((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(img, 0, 0);
+                        resolve(canvas.toDataURL('image/png'));
+                    } else {
+                        reject(new Error('Canvas context failed'));
+                    }
+                };
+                img.onerror = reject;
+                img.src = stickerWithNoBg;
+            });
+
+            // 4. Cleanup noise and artifacts from background removal
+            if (cleanupSticker) {
+                processedDataUrl = await cleanupNoise(processedDataUrl);
+
+                // 5. Remove isolated components (keep only the largest subject)
+                // This effectively "extracts the face" if it's the main component and removes floating noise
+                processedDataUrl = await removeIsolatedComponents(processedDataUrl);
+            }
+
+            // 6. Trim transparent borders (crop to subject/face)
+            if (autoCropSticker) {
+                processedDataUrl = await trimTransparency(processedDataUrl);
+            }
+
+            // 7. Apply outline effect if enabled
+            if (cartoonizeSticker) {
+                processedDataUrl = await cartoonize(processedDataUrl);
+            }
+
+            // Save to IndexedDB and update state directly
+            await saveCustomSticker(processedDataUrl);
+            // Update state directly with new sticker at beginning
+            setCustomStickers(prev => [processedDataUrl, ...prev].slice(0, 20));
+
+            // Auto-select the new sticker and position it on the image
+            setActiveSticker(processedDataUrl);
+            setStickerSize(200);
+            if (imageRef.current) {
+                setStickerPos({
+                    x: (imageRef.current.naturalWidth / 2) - 100,
+                    y: (imageRef.current.naturalHeight / 2) - 100
+                });
+            }
+
+            showToast("Sticker ready! Adjust position and click Apply", "success");
+        } catch (err) {
+            console.error('Failed to create sticker:', err);
+            showToast("Failed to create sticker", "error");
+        } finally {
+            setIsUploadingSticker(false);
+            setStickerCropSrc(null); // Close modal if open
+        }
+    };
+
+
+
+    // Set initial crop when base dimensions are loaded to avoid race conditions
+    useEffect(() => {
+        if (stickerBaseDim) {
+            const initialCrop = {
+                unit: '%',
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 100
+            };
+            setStickerCrop(initialCrop as any);
+        }
+    }, [stickerBaseDim]);
+
+    // Handle initial file selection - Open Crop UI
+    const handleStickerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            // Set for cropping
+            setStickerCropSrc(dataUrl);
+            setStickerZoom(1); // Reset zoom
+            setStickerBaseDim(null); // Reset base dimensions
+            // Reset crop to full coverage
+            setStickerCrop({
+                unit: '%',
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 100
+            });
+            // Reset input
+            e.target.value = '';
+        } catch (err) {
+            console.error("Failed to read file", err);
+        }
+    };
+
+    const handleConfirmStickerCrop = async () => {
+        if (!stickerCropSrc || !stickerCroppedAreaPixels) {
+            // If no crop (or just full image), just process original
+            if (stickerCropSrc) processSticker(stickerCropSrc);
+            return;
+        }
+
+        try {
+            const croppedImage = await getCroppedImg(stickerCropSrc, stickerCroppedAreaPixels);
+            await processSticker(croppedImage);
+        } catch (e) {
+            console.error(e);
+            showToast("Crop failed, using original", "error");
+            if (stickerCropSrc) await processSticker(stickerCropSrc);
+        }
+    };
+
+    const handleCancelStickerCrop = () => {
+        setStickerCropSrc(null);
+    };
+
+    // Handle deleting a custom sticker
+    const handleDeleteCustomSticker = async (index: number) => {
+        await deleteCustomSticker(index);
+        setCustomStickers(await getCustomStickers());
     };
 
     const handleApplyQR = async () => {
@@ -3035,17 +3222,126 @@ export function Editor() {
                                             </div>
 
                                             {/* Sticker Grid */}
-                                            <div className="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto p-1">
-                                                {STICKER_CATEGORIES.find(c => c.id === activeStickerTab)?.items.map((item, idx) => (
-                                                    <button
-                                                        key={idx}
-                                                        onClick={() => handleSelectSticker(item)}
-                                                        className="aspect-square flex items-center justify-center text-2xl hover:bg-white/10 rounded-lg transition-colors border border-transparent hover:border-white/20"
-                                                    >
-                                                        {item}
-                                                    </button>
-                                                ))}
-                                            </div>
+                                            {activeStickerTab === 'custom' ? (
+                                                <div className="space-y-3">
+                                                    <label className="flex items-center gap-2 cursor-pointer bg-white/5 p-2 rounded-lg hover:bg-white/10 transition-colors">
+                                                        <div className="relative flex items-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={cleanupSticker}
+                                                                onChange={(e) => setCleanupSticker(e.target.checked)}
+                                                                className="peer sr-only"
+                                                            />
+                                                            <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-teal-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="text-sm font-medium">Smart Cleanup</span>
+                                                            <span className="text-[10px] text-slate-400">Remove noise/artifacts</span>
+                                                        </div>
+                                                    </label>
+
+                                                    <label className="flex items-center gap-2 cursor-pointer bg-white/5 p-2 rounded-lg hover:bg-white/10 transition-colors">
+                                                        <div className="relative flex items-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={autoCropSticker}
+                                                                onChange={(e) => setAutoCropSticker(e.target.checked)}
+                                                                className="peer sr-only"
+                                                            />
+                                                            <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-teal-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="text-sm font-medium">Auto Crop</span>
+                                                            <span className="text-[10px] text-slate-400">Trim transparent edges</span>
+                                                        </div>
+                                                    </label>
+
+                                                    {/* Cartoonize Toggle */}
+                                                    <label className="flex items-center gap-3 p-3 bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-colors">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={cartoonizeSticker}
+                                                            onChange={(e) => setCartoonizeSticker(e.target.checked)}
+                                                            className="w-4 h-4 rounded border-white/20 bg-slate-800 text-teal-500 focus:ring-teal-500 focus:ring-offset-0"
+                                                        />
+                                                        <div className="flex-1">
+                                                            <span className="text-sm text-slate-300">Add Outline</span>
+                                                            <p className="text-[10px] text-slate-500">Add white border for sticker look</p>
+                                                        </div>
+                                                    </label>
+
+                                                    {/* Upload Button */}
+                                                    <label className={clsx(
+                                                        "flex flex-col items-center justify-center gap-2 p-4 border-2 border-dashed rounded-xl cursor-pointer transition-all",
+                                                        isUploadingSticker
+                                                            ? "border-teal-500/50 bg-teal-500/10"
+                                                            : "border-white/20 hover:border-teal-400 hover:bg-white/5"
+                                                    )}>
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            onChange={handleStickerUpload}
+                                                            disabled={isUploadingSticker}
+                                                            className="hidden"
+                                                        />
+                                                        {isUploadingSticker ? (
+                                                            <>
+                                                                <div className="animate-spin h-6 w-6 border-2 border-teal-400 border-t-transparent rounded-full" />
+                                                                <span className="text-xs text-teal-400">Removing background...</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Plus className="h-6 w-6 text-slate-400" />
+                                                                <span className="text-xs text-slate-400">Upload Image</span>
+                                                                <span className="text-[10px] text-slate-500">Background auto-removed</span>
+                                                            </>
+                                                        )}
+                                                    </label>
+
+                                                    {/* Custom Stickers Grid */}
+                                                    {customStickers.length > 0 ? (
+                                                        <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1">
+                                                            {customStickers.map((sticker, idx) => (
+                                                                <div key={idx} className="relative group">
+                                                                    <button
+                                                                        onClick={() => handleSelectCustomSticker(sticker)}
+                                                                        className="aspect-square w-full flex items-center justify-center hover:bg-white/10 rounded-lg transition-colors border border-white/10 hover:border-teal-400/50 overflow-hidden"
+                                                                    >
+                                                                        <img
+                                                                            src={sticker}
+                                                                            alt={`Custom sticker ${idx + 1}`}
+                                                                            className="w-full h-full object-contain p-1"
+                                                                        />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); handleDeleteCustomSticker(idx); }}
+                                                                        className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-lg"
+                                                                        title="Delete sticker"
+                                                                    >
+                                                                        <X className="h-3 w-3" />
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-slate-500 text-center py-4">
+                                                            No custom stickers yet. Upload an image to create one!
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto p-1">
+                                                    {STICKER_CATEGORIES.find(c => c.id === activeStickerTab)?.items.map((item, idx) => (
+                                                        <button
+                                                            key={idx}
+                                                            onClick={() => handleSelectSticker(item)}
+                                                            className="aspect-square flex items-center justify-center text-2xl hover:bg-white/10 rounded-lg transition-colors border border-transparent hover:border-white/20"
+                                                        >
+                                                            {item}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
 
                                             {activeSticker && (
                                                 <div className="border-t border-white/10 pt-4 space-y-4">
@@ -3221,6 +3517,103 @@ export function Editor() {
                     />
                 )
             }
+            {/* Sticker Crop Modal */}
+            {stickerCropSrc && (
+                <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4">
+                    <div className="w-full max-w-4xl h-[80vh] relative bg-slate-900 rounded-lg overflow-hidden flex flex-col border border-white/10 shadow-2xl">
+                        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-800">
+                            <div>
+                                <h3 className="text-white font-medium">Crop Sticker</h3>
+                                <p className="text-xs text-slate-400">Crop tight around the subject for best results</p>
+                            </div>
+                            <button onClick={handleCancelStickerCrop} className="text-slate-400 hover:text-white p-2">
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 relative bg-[url('/transparent-bg.png')] bg-repeat overflow-auto flex items-center justify-center p-8 bg-slate-950/50">
+                            <ReactCrop
+                                crop={stickerCrop}
+                                onChange={(_, percentCrop) => setStickerCrop(percentCrop)}
+                                aspect={undefined}
+                                minWidth={10}
+                                minHeight={10}
+                                onComplete={(c) => {
+                                    setStickerCompletedCrop(c);
+                                    if (stickerImgRef.current) {
+                                        const image = stickerImgRef.current;
+                                        const scaleX = image.naturalWidth / image.width;
+                                        const scaleY = image.naturalHeight / image.height;
+                                        setStickerCroppedAreaPixels({
+                                            x: c.x * scaleX,
+                                            y: c.y * scaleY,
+                                            width: c.width * scaleX,
+                                            height: c.height * scaleY,
+                                        });
+                                    }
+                                }}
+                                className="min-w-min"
+                            >
+                                <img
+                                    ref={stickerImgRef}
+                                    src={stickerCropSrc}
+                                    alt="Crop Sticker"
+                                    className={clsx(
+                                        "object-contain transition-all duration-200 ease-out",
+                                        !stickerBaseDim && "max-w-full max-h-[60vh]"
+                                    )}
+                                    style={stickerBaseDim ? {
+                                        width: stickerBaseDim.w * stickerZoom,
+                                        height: stickerBaseDim.h * stickerZoom,
+                                        maxWidth: 'none',
+                                        maxHeight: 'none'
+                                    } : {}}
+                                    onLoad={(e) => {
+                                        const { width, height } = e.currentTarget;
+                                        // Capture base dimensions (Fit to screen)
+                                        if (!stickerBaseDim) {
+                                            setStickerBaseDim({ w: width, h: height });
+                                        }
+                                    }}
+                                />
+                            </ReactCrop>
+                        </div>
+
+                        <div className="p-4 border-t border-white/10 bg-slate-800 flex justify-between items-center gap-4">
+                            <div className="w-64">
+                                <Slider
+                                    label="Zoom"
+                                    value={stickerZoom}
+                                    min={0.5}
+                                    max={3}
+                                    step={0.1}
+                                    onChange={(e) => setStickerZoom(parseFloat(e.target.value))}
+                                    valueDisplay={`${Math.round(stickerZoom * 100)}%`}
+                                />
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={handleCancelStickerCrop}
+                                    className="px-4 py-2 rounded-lg text-slate-300 hover:bg-white/5 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleConfirmStickerCrop}
+                                    disabled={isUploadingSticker}
+                                    className={clsx(
+                                        "px-4 py-2 rounded-lg bg-teal-500 text-white flex items-center gap-2 shadow-lg shadow-teal-500/20 transition-all",
+                                        isUploadingSticker ? "opacity-50 cursor-not-allowed" : "hover:bg-teal-400 hover:scale-105"
+                                    )}
+                                >
+                                    {isUploadingSticker ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                    {isUploadingSticker ? "Processing..." : "Apply Crop & Use"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }

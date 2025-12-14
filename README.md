@@ -88,6 +88,40 @@ docker run -p 3000:3000 \
    docker-compose up -d
    ```
 
+### Reverse Proxy Configuration (Nginx)
+
+If you're running Ranthal behind an Nginx reverse proxy, you **must** increase the body size limit to allow large image uploads. By default, Nginx limits requests to 1MB.
+
+Add `client_max_body_size` to your Nginx configuration:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com;
+
+    # Allow large file uploads (required for image editing)
+    client_max_body_size 50m;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+After updating, reload Nginx:
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
 ## License

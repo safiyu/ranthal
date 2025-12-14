@@ -2,7 +2,7 @@
 
 # Build the Docker image
 echo "Building Docker image..."
-docker build -t safiyu/ranthal:latest .
+docker build --no-cache -t safiyu/ranthal:latest .
 
 # Push to Docker Hub
 echo "Pushing to Docker Hub..."
