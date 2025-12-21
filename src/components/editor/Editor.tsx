@@ -47,7 +47,8 @@ import {
     Focus,
     QrCode,
     Sparkles,
-    Loader2
+    Loader2,
+    ArrowLeftRight
 } from "lucide-react";
 import { saveEdit } from "@/app/actions";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -64,6 +65,7 @@ import { generateQRCode, formatWifi, formatVCard, formatSms, formatEmail, format
 import { STICKER_CATEGORIES, emojiToDataURL, getCustomStickers, saveCustomSticker, deleteCustomSticker } from "@/lib/sticker-utils";
 import { overlayImage } from "@/lib/image-processing";
 import { Sticker as StickerIcon } from "lucide-react";
+import { logUserAction } from "@/lib/actions/log";
 
 type Tool = "bg-remove" | "crop" | "ocr" | "id-card" | "compress" | "convert" | "filters" | "social-filters" | "adjust" | "transform" | "blur" | "redeye" | "draw" | "hand" | "collage" | "qr-code" | "sticker" | "remaster";
 type DrawingMode = "pen" | "highlighter" | "eraser";
@@ -137,6 +139,12 @@ export function Editor() {
 
     // Filters State
     const [selectedFilter, setSelectedFilter] = useState<FilterName>("none");
+    const [originalFilename, setOriginalFilename] = useState<string>("image");
+
+    // Helper to log with filename
+    const logWithFilename = async (action: string, details: any = {}) => {
+        await logUserAction(action, { ...details, filename: originalFilename });
+    };
 
     // Adjustments State
     const [brightness, setBrightness] = useState(100);
@@ -213,7 +221,11 @@ export function Editor() {
     const imageStateRef = useRef(imageState);
     useEffect(() => {
         imageStateRef.current = imageState;
-    }, [imageState]);
+        // Sync filename from state if available
+        if (imageState?.filename && imageState.filename !== originalFilename) {
+            setOriginalFilename(imageState.filename);
+        }
+    }, [imageState, originalFilename]);
 
     // Derived State
     // If comparing, show the SNAPSHOT (or last committed/original if no snapshot).
@@ -356,19 +368,25 @@ export function Editor() {
         return filters.join(' ');
     };
 
-    const onDrop = useCallback((acceptedFiles: File[]) => {
+    const onDrop = useCallback(async (acceptedFiles: File[]) => {
         const file = acceptedFiles[0];
         if (file) {
+            setOriginalFilename(file.name);
             const reader = new FileReader();
-            reader.onload = () => {
+            reader.onload = async () => {
+                const src = reader.result as string;
                 pushState({
-                    src: reader.result as string,
+                    src,
                     processedSrc: null,
+                    filename: file.name
                 });
+                // Explicitly pass filename to avoid race condition with state
+                await logUserAction("IMAGE_DROPPED", { size: file.size, type: file.type, filename: file.name });
             };
             reader.readAsDataURL(file);
         }
     }, [pushState]);
+
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, accept: { 'image/*': [] }, maxFiles: 1 });
 
@@ -487,22 +505,39 @@ export function Editor() {
 
 
 
-    const handleRemaster = async () => {
+    const generateRemasterPreview = async () => {
         if (!imageState) return;
         setIsProcessing(true);
         try {
             const source = imageState.originalSrc || imageState.src;
             if (!source) return;
 
-            // Replay existing actions first to bake them in?
-            // If we don't, Remaster will run on raw original, ignoring previous edits.
-            // Usually Remaster is done early. But if late, we should Baking.
+            // Replay existing actions first to bake them in
             const hasActions = imageState.actions && imageState.actions.length > 0;
             const inputForRemaster = hasActions
-                ? await replayActions(source, imageState.actions!)
+                ? await replayActions(source, imageState!.actions!)
                 : source;
 
-            const newOriginal = await remasterImage(inputForRemaster);
+            // Set snapshot for comparison BEFORE applying remaster
+            setCompareSnapshot(inputForRemaster);
+
+            const remastered = await remasterImage(inputForRemaster);
+            setPreviewSrc(remastered);
+
+        } catch (err) {
+            showToast("Remaster preview failed", "error");
+            setActiveTool(null);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const applyRemaster = async () => {
+        if (!previewSrc || !imageState) return;
+
+        setIsProcessing(true);
+        try {
+            const newOriginal = previewSrc;
             const newProxy = await generateProxy(newOriginal);
 
             pushState({
@@ -513,13 +548,22 @@ export function Editor() {
                 actions: []
             });
             showToast("Remaster successful", "success");
+            setPreviewSrc(null);
+            setCompareSnapshot(null);
         } catch (err) {
-            showToast("Remaster failed", "error");
+            showToast("Failed to apply remaster", "error");
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
         }
     };
+
+    // Auto-generate remaster preview when tool is activated
+    useEffect(() => {
+        if (activeTool === 'remaster' && !previewSrc && !isProcessing) {
+            generateRemasterPreview();
+        }
+    }, [activeTool]);
 
 
 
@@ -745,6 +789,7 @@ export function Editor() {
                 ctx.drawImage(img, 0, 0);
                 const newSrc = canvas.toDataURL(`image/${format}`);
                 pushState({ ...imageState!, processedSrc: newSrc });
+                await logWithFilename("IMAGE_CONVERTED", { format });
             }
         } catch (e) {
             console.error(e);
@@ -762,6 +807,7 @@ export function Editor() {
         try {
             const text = await extractText(currentImage);
             setExtractedText(text);
+            await logWithFilename("TEXT_EXTRACTED", { length: text.length });
         } catch (error) {
             // Don't show error if operation was cancelled
             if ((error as Error).message !== 'Operation cancelled') {
@@ -911,10 +957,12 @@ export function Editor() {
                     if (result.success) {
                         showToast("Project saved successfully!", "success");
                         router.refresh();
+                        await logWithFilename("PROJECT_SAVED", { tool: activeTool || "unknown", format: outputMimeType, size: blob.size });
                     }
                 } catch (error) {
                     console.error("Failed to save:", error);
                     showToast("Failed to save project (Size too large?)", "error");
+                    await logWithFilename("SAVE_FAILED", { error: (error as Error).message });
                 } finally {
                     setIsProcessing(false);
                 }
@@ -1034,21 +1082,32 @@ export function Editor() {
                 const writable = await fileHandle.createWritable();
                 await writable.write(blob);
                 await writable.close();
+                await logWithFilename("IMAGE_DOWNLOADED", { format: outputMimeType, size: blob.size });
             } else {
                 // Fallback Download
                 const blobUrl = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = blobUrl;
-                link.download = defaultFilename;
-                link.style.display = 'none';
+                // Trigger download
+                const link = document.createElement("a"); // Changed to 'a' for download
+                link.href = finalDataUrl;
+                link.download = `ranthal-edit-${Date.now()}.${outputExtension}`; // Use outputExtension
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
+
+                // Log download
+                // To get width/height for logging, we need to load the image again or pass it from toDataURL
+                // For simplicity, we'll use the dimensions from the finalDataUrl if possible, or default.
+                const img = new Image();
+                img.src = finalDataUrl;
+                await new Promise(resolve => { img.onload = resolve; });
+                await logWithFilename("IMAGE_DOWNLOADED", { format: outputMimeType, width: img.width, height: img.height });
+
                 setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
             }
 
         } catch (error) {
             console.error('Download failed:', error);
+            await logWithFilename("DOWNLOAD_FAILED", { error: (error as Error).message });
             alert('Download failed. Please try again.');
         } finally {
             setIsProcessing(false);
@@ -1109,6 +1168,7 @@ export function Editor() {
             });
 
             showToast("Adjustments applied", "success");
+            await logWithFilename("ADJUSTMENTS_APPLIED", { brightness, contrast, saturation });
 
             // Reset values
             setBrightness(100);
@@ -1141,6 +1201,8 @@ export function Editor() {
             const newSrc = await rotateImage(imageState.processedSrc || imageState.src, angle);
 
             pushState({ ...imageState, processedSrc: newSrc, actions: newActions });
+            // Log transform
+            await logWithFilename("IMAGE_TRANSFORMED", { type: "rotate", angle });
             setRotation(0);
         } catch (err) {
             showToast("Failed to rotate", "error");
@@ -1165,6 +1227,8 @@ export function Editor() {
             const newSrc = await flipImage(imageState.processedSrc || imageState.src, direction);
 
             pushState({ ...imageState, processedSrc: newSrc, actions: newActions });
+            // Log transform
+            await logWithFilename("IMAGE_TRANSFORMED", { type: "flip", direction });
         } catch (err) {
             showToast("Failed to flip", "error");
         } finally {
@@ -1189,6 +1253,7 @@ export function Editor() {
             const newActions = [...(imageState.actions || []), action];
 
             pushState({ ...imageState, processedSrc: previewSrc, actions: newActions });
+            await logWithFilename("BLUR_SHARPEN_APPLIED", { blur: blurAmount, sharpen: sharpenAmount });
 
             setPreviewSrc(null);
             setIsProcessing(false);
@@ -1219,6 +1284,7 @@ export function Editor() {
             const newActions = [...(imageState.actions || []), action];
 
             pushState({ ...imageState, processedSrc, actions: newActions });
+            await logWithFilename("BLUR_SHARPEN_APPLIED", { blur: blurAmount, sharpen: sharpenAmount });
         } catch (err) {
             showToast("Failed to apply effects", "error");
         } finally {
@@ -1241,6 +1307,8 @@ export function Editor() {
             // Apply to center area as a demonstration
             const newSrc = await fixRedEye(currentImage, img.width / 2, img.height / 3, 50);
             pushState({ ...imageState!, processedSrc: newSrc });
+            // Log red-eye fix
+            await logWithFilename("RED_EYE_FIXED", { x: img.width / 2, y: img.height / 3, radius: 50 });
         } catch (err) {
             showToast("Failed to fix red-eye", "error");
         } finally {
@@ -1278,6 +1346,7 @@ export function Editor() {
                     y: (imageRef.current.naturalHeight / 2) - 100
                 });
             }
+            await logWithFilename("QR_CODE_GENERATED", { type: qrType, content_length: textToEncode.length });
         } catch (e) {
             showToast("Failed to generate QR Code", "error");
         }
@@ -1324,6 +1393,7 @@ export function Editor() {
             setActiveSticker(null);
             setActiveTool(null);
             showToast("Sticker applied successfully", "success");
+            await logWithFilename("STICKER_APPLIED", { stickerSrc: activeSticker.substring(0, 50) + "...", rotation: stickerRotation });
         } catch (err) {
             showToast("Failed to apply sticker", "error");
         } finally {
@@ -1342,6 +1412,7 @@ export function Editor() {
                 y: (imageRef.current.naturalHeight / 2) - 100
             });
         }
+        logWithFilename("STICKER_SELECTED", { type: "emoji", emoji });
     };
 
     // Load custom stickers from IndexedDB on mount
@@ -1359,6 +1430,7 @@ export function Editor() {
                 y: (imageRef.current.naturalHeight / 2) - 100
             });
         }
+        logWithFilename("STICKER_SELECTED", { type: "custom", dataUrl: dataUrl.substring(0, 50) + "..." });
     };
 
     // Process the final sticker image (after optional cropping)
@@ -1425,9 +1497,15 @@ export function Editor() {
             }
 
             showToast("Sticker ready! Adjust position and click Apply", "success");
+            await logWithFilename("CUSTOM_STICKER_CREATED", {
+                cleanup: cleanupSticker,
+                autoCrop: autoCropSticker,
+                cartoonize: cartoonizeSticker
+            });
         } catch (err) {
             console.error('Failed to create sticker:', err);
             showToast("Failed to create sticker", "error");
+            await logWithFilename("CUSTOM_STICKER_CREATION_FAILED", { error: (err as Error).message });
         } finally {
             setIsUploadingSticker(false);
             setStickerCropSrc(null); // Close modal if open
@@ -1477,8 +1555,10 @@ export function Editor() {
             });
             // Reset input
             e.target.value = '';
+            await logWithFilename("STICKER_UPLOAD_INITIATED", { stickerFilename: file.name, size: file.size });
         } catch (err) {
             console.error("Failed to read file", err);
+            await logWithFilename("STICKER_UPLOAD_FAILED", { error: (err as Error).message });
         }
     };
 
@@ -1492,21 +1572,25 @@ export function Editor() {
         try {
             const croppedImage = await getCroppedImg(stickerCropSrc, stickerCroppedAreaPixels);
             await processSticker(croppedImage);
+            await logWithFilename("STICKER_CROPPED_AND_PROCESSED", { crop: stickerCroppedAreaPixels });
         } catch (e) {
             console.error(e);
             showToast("Crop failed, using original", "error");
             if (stickerCropSrc) await processSticker(stickerCropSrc);
+            await logWithFilename("STICKER_CROP_FAILED", { error: (e as Error).message });
         }
     };
 
     const handleCancelStickerCrop = () => {
         setStickerCropSrc(null);
+        logWithFilename("STICKER_CROP_CANCELLED");
     };
 
     // Handle deleting a custom sticker
     const handleDeleteCustomSticker = async (index: number) => {
         await deleteCustomSticker(index);
         setCustomStickers(await getCustomStickers());
+        logWithFilename("CUSTOM_STICKER_DELETED", { index });
     };
 
     const handleApplyQR = async () => {
@@ -1519,9 +1603,11 @@ export function Editor() {
             setQrCodeSrc(null);
             setQrText("");
             setActiveTool(null);
+            await logWithFilename("QR_CODE_APPLIED", { position: qrPosition, size: qrSize });
         } catch (e) {
             console.error(e);
             showToast("Failed to apply QR Code", "error");
+            await logWithFilename("QR_CODE_APPLY_FAILED", { error: (e as Error).message });
         } finally {
             setIsProcessing(false);
         }
@@ -1702,6 +1788,7 @@ export function Editor() {
         if (ctx) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
+        logWithFilename("DRAWING_CLEARED");
     };
 
     const applyDrawing = async () => {
@@ -1727,8 +1814,10 @@ export function Editor() {
 
             pushState({ ...imageState!, processedSrc: canvas.toDataURL('image/png') });
             clearDrawing();
+            await logWithFilename("DRAWING_APPLIED", { brushColor, brushSize, drawingMode, highlighterOpacity });
         } catch (err) {
             showToast("Failed to apply drawing", "error");
+            await logWithFilename("DRAWING_APPLY_FAILED", { error: (err as Error).message });
         } finally {
             setIsProcessing(false);
             setActiveTool(null);
@@ -1759,11 +1848,13 @@ export function Editor() {
                         timestamp: Date.now(),
                         filterName: selectedFilter
                     };
+                    await logWithFilename("FILTER_APPLIED", { filterName: selectedFilter });
                 } else if (activeTool === 'remaster') {
                     // Remaster is unique, maybe no action yet or custom action?
                     // For now, let's treat it as a generic "replace image" action or just skip action recording (legacy fallback)
                     // If we want to support it, we need a 'remaster' action type.
                     // Let's assume for now Remaster is destructive/base improvement.
+                    await logWithFilename("IMAGE_REMASTERED");
                 }
 
                 const newActions = newAction
@@ -1799,6 +1890,7 @@ export function Editor() {
         } catch (e: any) {
             console.error("Crash in applyPreview:", e);
             window.alert("Critical Error Applying: " + e.message);
+            await logWithFilename("APPLY_PREVIEW_FAILED", { error: e.message });
         }
     };
 
@@ -1810,8 +1902,10 @@ export function Editor() {
             setContrast(100);
             setSaturation(100);
             setActiveTool(null);
+            logWithFilename("ADJUSTMENTS_CANCELLED");
         } else {
             if (activeTool === 'remaster') setActiveTool(null);
+            logWithFilename("PREVIEW_CANCELLED", { tool: activeTool });
         }
     };
 
@@ -1849,7 +1943,7 @@ export function Editor() {
                         {/* Group: Smart Actions */}
                         <div className="space-x-2 lg:space-x-0 lg:space-y-2 flex flex-row lg:flex-col">
                             <h3 className="hidden xl:block text-xs font-bold text-teal-400 uppercase tracking-wider px-2">Smart Tools</h3>
-                            <ToolButton active={activeTool === "remaster"} onClick={() => { activateTool("remaster"); handleRemaster(); }} icon={<Sparkles />} label="Remaster" disabled={!imageState} />
+                            <ToolButton active={activeTool === "remaster"} onClick={() => activateTool("remaster")} icon={<Sparkles />} label="Remaster" disabled={!imageState} />
                             <ToolButton active={activeTool === "bg-remove"} onClick={() => { activateTool("bg-remove"); handleBgRemove(); }} icon={<Layers />} label="Remove BG" disabled={!imageState} />
                             <ToolButton active={activeTool === "collage"} onClick={() => {
                                 activateTool("collage");
@@ -2206,7 +2300,7 @@ export function Editor() {
                                                         let angle = Math.atan2(dy, dx) * (180 / Math.PI);
                                                         // atan2(0,-1) is 180 (Left). atan2(-1,0) is -90 (Top).
                                                         // We want Top to be 0 deg.
-                                                        // So -90 + offset = 0 => offset = +90.
+                                                        // So -90 + offset = +90.
                                                         setStickerRotation(angle + 90);
                                                     };
 
@@ -2219,7 +2313,7 @@ export function Editor() {
                                                     document.addEventListener('mouseup', handleRotateUp);
                                                 }}
                                             >
-                                                <RotateCw className="w-3 h-3 text-teal-600" />
+                                                <RotateCw className="h-3 w-3 text-teal-600" />
                                             </div>
                                         </>
                                     )}
@@ -2371,6 +2465,7 @@ export function Editor() {
 
                                     // Clear URL parameter when closing
                                     router.push('/editor');
+                                    logWithFilename("EDITOR_RESET");
                                 }}
                                 className="w-10 h-10 flex items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 backdrop-blur-md transition-colors shadow-lg"
                                 title="Close / Reset"
@@ -2636,6 +2731,43 @@ export function Editor() {
                                 }
 
                                 {
+                                    activeTool === "remaster" && (
+                                        <div className="space-y-4">
+                                            <p className="text-xs text-slate-400">Automatically enhance your image details.</p>
+
+                                            {isProcessing ? (
+                                                <div className="flex flex-col items-center justify-center py-8 gap-3">
+                                                    <div className="animate-spin h-8 w-8 border-2 border-teal-500 border-t-transparent rounded-full" />
+                                                    <p className="text-xs text-teal-400">Remastering...</p>
+                                                </div>
+                                            ) : (
+                                                <div className="flex gap-4 justify-center pt-2">
+                                                    <button
+                                                        onMouseDown={() => setIsComparing(true)}
+                                                        onMouseUp={() => setIsComparing(false)}
+                                                        onTouchStart={() => setIsComparing(true)}
+                                                        onTouchEnd={() => setIsComparing(false)}
+                                                        onMouseLeave={() => setIsComparing(false)}
+                                                        className="h-10 w-10 rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-white/10 flex items-center justify-center transition-all select-none"
+                                                        title="Hold to Compare"
+                                                    >
+                                                        <ArrowLeftRight className="h-5 w-5" />
+                                                    </button>
+                                                    <button
+                                                        onClick={applyRemaster}
+                                                        disabled={!previewSrc}
+                                                        className="h-10 w-10 rounded-full bg-teal-500 text-white hover:bg-teal-400 hover:shadow-teal-500/50 shadow-lg shadow-teal-500/20 border border-transparent flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        title="Apply Remaster"
+                                                    >
+                                                        <Check className="h-5 w-5" />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                }
+
+                                {
                                     activeTool === "filters" && (
                                         <div className="space-y-4">
                                             <p className="text-xs text-slate-400">Apply preset image filters.</p>
@@ -2875,6 +3007,7 @@ export function Editor() {
                                                                 setCollageImages(prev => prev.filter((_, i) => i !== idx));
                                                                 setCollageTransforms(prev => prev.filter((_, i) => i !== idx));
                                                                 if (selectedSlot >= collageImages.length - 1) setSelectedSlot(Math.max(0, collageImages.length - 2));
+                                                                logWithFilename("COLLAGE_IMAGE_REMOVED", { index: idx });
                                                             }}
                                                             className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
                                                         >

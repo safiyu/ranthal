@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { writeFile, mkdir, unlink } from "fs/promises";
 import { join } from "path";
 import { eq, and, lt } from "drizzle-orm";
+import { logUserAction } from "@/lib/actions/log";
 
 export async function saveEdit(formData: FormData) {
     const session = await auth();
@@ -28,8 +29,17 @@ export async function saveEdit(formData: FormData) {
     const uploadDir = join(process.cwd(), "public/uploads");
     await mkdir(uploadDir, { recursive: true });
 
-    // Generate unique filename
-    const filename = `${session.user.id}-${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
+    // Determine extension from MIME type or filename
+    let extension = "png"; // Default
+    if (resultImage.type === "image/jpeg") extension = "jpg";
+    else if (resultImage.type === "image/webp") extension = "webp";
+    else if (resultImage.name && resultImage.name.includes('.')) {
+        const parts = resultImage.name.split('.');
+        extension = parts[parts.length - 1];
+    }
+
+    // Generate unique filename using UUID
+    const filename = `${session.user.id}-${Date.now()}-${crypto.randomUUID()}.${extension}`;
     const filepath = join(uploadDir, filename);
 
     // Convert file to buffer and write to disk
@@ -50,6 +60,10 @@ export async function saveEdit(formData: FormData) {
     });
 
     revalidatePath("/dashboard");
+
+    // Log success
+    await logUserAction("PROJECT_SAVED", { filename, toolUsed });
+
     return { success: true, url: resultUrl };
 }
 

@@ -103,3 +103,20 @@ export const authenticators = sqliteTable(
         }),
     })
 )
+
+export const twoFactorSecrets = sqliteTable("two_factor_secrets", {
+    userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes"), // JSON string of backup codes
+    isEnabled: integer("is_enabled", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "timestamp" }).default(new Date()),
+});
+
+export const auditLogs = sqliteTable("audit_logs", {
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => users.id),
+    action: text("action").notNull(), // 'LOGIN', 'LOGOUT', 'UPDATE_ROLE', 'DELETE_USER', etc.
+    details: text("details"), // JSON string for extra info
+    ip: text("ip"),
+    timestamp: integer("timestamp", { mode: "timestamp" }).default(new Date()),
+});

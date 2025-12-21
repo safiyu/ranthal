@@ -12,4 +12,5 @@ export type ImageState = {
 
     collageImages?: string[];
     activeLayout?: string;
+    filename?: string;
 };

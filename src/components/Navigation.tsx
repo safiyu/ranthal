@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { LogOut, User, ChevronDown, Image as ImageIcon, Menu, X, Sparkles, History as HistoryIcon } from "lucide-react";
+import { LogOut, User, ChevronDown, Image as ImageIcon, Menu, X, Sparkles, History as HistoryIcon, Activity, Shield } from "lucide-react";
 import { useSession, signOut } from "next-auth/react";
 import { AboutButton } from "@/components/AboutButton";
 import { WallpaperPicker } from "@/components/WallpaperPicker";
@@ -106,6 +106,22 @@ export function Navigation() {
                                             </p>
                                         </div>
                                         <div className="p-1">
+                                            <Link
+                                                href="/dashboard/activity"
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-white/10 rounded-lg transition-colors mb-1"
+                                                role="menuitem"
+                                            >
+                                                <Activity className="h-4 w-4" />
+                                                My Activity
+                                            </Link>
+                                            <Link
+                                                href="/dashboard/security"
+                                                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-white/10 rounded-lg transition-colors mb-1"
+                                                role="menuitem"
+                                            >
+                                                <Shield className="h-4 w-4" />
+                                                Security
+                                            </Link>
                                             {session.user.role === "admin" && (
                                                 <Link
                                                     href="/admin/users"

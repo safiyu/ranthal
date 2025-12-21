@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1765402828577,
-      "tag": "0000_fair_gunslinger",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1765403231792,
-      "tag": "0001_quick_skreet",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1765481172958,
-      "tag": "0002_slimy_human_fly",
+      "when": 1765730929736,
+      "tag": "0000_remarkable_corsair",
       "breakpoints": true
     }
   ]

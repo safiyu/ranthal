@@ -52,7 +52,25 @@ export const generateProxy = async (src: string, maxWidth = 1920): Promise<strin
             const ctx = canvas.getContext("2d");
             if (ctx) {
                 ctx.drawImage(img, 0, 0, width, height);
-                resolve(canvas.toDataURL("image/jpeg", 0.9)); // JPEG 90% for speed
+
+                // DETECT FORMAT for transparency preservation
+                // If the source was a deeply nested data URL, we might need to check the string prefix.
+                // Or we can just default to PNG if we suspect transparency.
+                // However, always sending PNG makes proxies heavy (5-10MB vs 200KB JPEG).
+
+                // Heuristic: Check source string
+                let mimeType = "image/jpeg";
+                let quality = 0.9;
+
+                if (src.startsWith("data:image/png") || src.startsWith("data:image/webp")) {
+                    mimeType = "image/png";
+                    quality = 1.0; // PNG quality arg is ignored usually, but good to set
+                } else if (src.toLowerCase().endsWith(".png") || src.toLowerCase().endsWith(".webp")) {
+                    mimeType = "image/png";
+                    quality = 1.0;
+                }
+
+                resolve(canvas.toDataURL(mimeType, quality));
             } else {
                 resolve(src); // Fallback
             }

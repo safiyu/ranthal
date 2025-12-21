@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { users, auditLogs } from "@/db/schema";
 import { hashPassword } from "@/lib/auth-utils";
 import { eq, desc } from "drizzle-orm";
 import { redirect } from "next/navigation";
@@ -113,4 +113,9 @@ export async function approveUser(userId: string) {
         console.error("Failed to approve user:", error);
         return { message: "Failed to approve user." };
     }
+}
+
+export async function getAuditLogs() {
+    await requireAdmin();
+    return db.select().from(auditLogs).orderBy(desc(auditLogs.timestamp)).limit(100).all();
 }
